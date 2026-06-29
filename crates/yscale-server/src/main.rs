@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use yscale_engine::{spawn_engine, Config, EngineHandle, SourceSpec};
+use yscale_engine::{spawn_engine, Config, EngineHandle, Silence, SourceSpec};
 
 /// ALSA loopback the URL/DLNA players feed; the engine captures the other end.
 const LOOPBACK_PLAYBACK: &str = "plughw:Loopback,0,0";
@@ -67,6 +67,24 @@ fn stop_player(s: &AppState) {
         let _ = child.kill();
         let _ = child.wait();
     }
+}
+
+/// Swap the engine source. If the new source opens an exclusive ALSA device
+/// (the loopback capture), first switch to silence so the RT thread *releases*
+/// the currently-held capture before we open it again — otherwise the
+/// double-open fails with EBUSY ("device or resource busy").
+async fn swap_source_releasing(s: &AppState, spec: SourceSpec) -> Result<(), AppError> {
+    if matches!(spec, SourceSpec::Capture { .. }) {
+        s.engine
+            .swap_source(Box::new(Silence::new(s.engine.sample_rate, s.engine.n_in)));
+        // > a couple of engine periods so the RT thread drops the old source.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    let src = spec
+        .build(s.engine.sample_rate, s.engine.n_in)
+        .map_err(AppError::bad)?;
+    s.engine.swap_source(src);
+    Ok(())
 }
 
 #[tokio::main]
@@ -144,10 +162,7 @@ async fn post_source(
 ) -> Result<Json<serde_json::Value>, AppError> {
     // Any explicit source selection ends URL streaming.
     stop_player(&s);
-    let source = spec
-        .build(s.engine.sample_rate, s.engine.n_in)
-        .map_err(AppError::bad)?;
-    s.engine.swap_source(source);
+    swap_source_releasing(&s, spec).await?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -195,13 +210,14 @@ async fn post_play(
         })?;
     *s.player.lock().unwrap() = Some(child);
 
-    // Route the loopback through the DSP.
-    let cap = SourceSpec::Capture {
-        device: LOOPBACK_CAPTURE.to_string(),
-    }
-    .build(s.engine.sample_rate, s.engine.n_in)
-    .map_err(AppError::bad)?;
-    s.engine.swap_source(cap);
+    // Route the loopback through the DSP (releasing any prior capture first).
+    swap_source_releasing(
+        &s,
+        SourceSpec::Capture {
+            device: LOOPBACK_CAPTURE.to_string(),
+        },
+    )
+    .await?;
 
     Ok(Json(serde_json::json!({ "ok": true, "playing": url })))
 }
