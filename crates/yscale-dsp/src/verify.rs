@@ -9,10 +9,29 @@
 //! 3. compare the IR's spectrum ([`dtft_magnitude`]) against an analytic transfer
 //!    function — a time-domain ↔ frequency-domain cross-check.
 //!
-//! If direct processing equals convolution-with-IR *and* the IR's DTFT matches
-//! the analytic response, the block is provably correct to numerical tolerance.
+//! If direct processing *matches* convolution-with-IR (within numerical
+//! tolerance) *and* the IR's DTFT matches the analytic response, the block is
+//! self-consistent and its coefficients realize the intended transfer function.
 //!
-//! **Scope.** This is only valid for LTI blocks: [`Biquad`](crate::Biquad),
+//! ## Important caveats (this is IIR, floating-point DSP)
+//!
+//! - **Not bit-exact.** Our blocks are IIR (Direct-Form-II-Transposed biquads
+//!   and cascades). The recursive filter evaluates products/sums in a different
+//!   order than the convolution sum, and `f64` addition is not associative — so
+//!   results agree only *within a small tolerance ε*, never exactly. Tests assert
+//!   `residual < ε`, not equality.
+//! - **IIR tails / truncation.** An IIR impulse response is infinite, so any
+//!   captured IR is truncated. [`lti_residual`] sidesteps this by comparing only
+//!   output indices `< ir_len`, which provably touch *only* captured IR taps;
+//!   the [`dtft_magnitude`] check instead uses a long IR plus a dB tolerance to
+//!   bound the truncation error.
+//! - **Self-consistency ≠ proof of linearity.** Matching one arbitrary signal
+//!   shows the block is consistent with its own IR, but a hidden nonlinearity
+//!   (e.g. saturation) would still pass at low amplitude. For an actual linearity
+//!   guarantee, also check [`homogeneity_residual`] (scaling) and
+//!   [`time_invariance_residual`] (shifting) — the two defining LTI properties.
+//!
+//! **Scope.** Valid only for LTI blocks: [`Biquad`](crate::Biquad),
 //! [`BiquadChain`](crate::BiquadChain), EQs, crossovers, [`Delay`](crate::Delay)
 //! and the [`ChannelMatrix`](crate::ChannelMatrix) (per output). It says nothing
 //! about time-variant or nonlinear stages (signal generators, mute toggling,
@@ -97,6 +116,43 @@ pub fn lti_residual<P: MonoProcessor>(p: &mut P, input: &[f64], ir_len: usize) -
     max
 }
 
+/// Homogeneity (scaling) residual: the max deviation from
+/// `process(k·x) == k·process(x)`. One of the two defining LTI properties — and
+/// unlike the convolution check, a hidden saturation/clipping bug fails this once
+/// `k` is large enough to reach the nonlinearity. Returns ~0 for a linear block.
+pub fn homogeneity_residual<P: MonoProcessor>(p: &mut P, input: &[f64], k: f64) -> f64 {
+    p.reset();
+    let y: Vec<f64> = input.iter().map(|&x| p.process_sample(x)).collect();
+    p.reset();
+    let yk: Vec<f64> = input.iter().map(|&x| p.process_sample(k * x)).collect();
+    p.reset();
+    y.iter()
+        .zip(&yk)
+        .map(|(a, b)| (k * a - b).abs())
+        .fold(0.0_f64, f64::max)
+}
+
+/// Time-invariance residual: the max deviation from "delaying the input by
+/// `shift` samples delays the output by `shift`". The other defining LTI
+/// property. Returns ~0 for a time-invariant block.
+pub fn time_invariance_residual<P: MonoProcessor>(p: &mut P, input: &[f64], shift: usize) -> f64 {
+    p.reset();
+    let y: Vec<f64> = input.iter().map(|&x| p.process_sample(x)).collect();
+    let mut shifted = vec![0.0; shift];
+    shifted.extend_from_slice(input);
+    p.reset();
+    let ys: Vec<f64> = shifted.iter().map(|&x| p.process_sample(x)).collect();
+    p.reset();
+    let mut max = 0.0_f64;
+    for n in 0..input.len() {
+        let d = (ys[n + shift] - y[n]).abs();
+        if d > max {
+            max = d;
+        }
+    }
+    max
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,20 +176,45 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn biquad_chain_equals_its_own_convolution() {
-        // The whole point: direct processing == convolution with the IR.
-        let mut chain = ParametricEq::from_bands([
+    fn demo_eq() -> BiquadChain {
+        ParametricEq::from_bands([
             Band::peaking(120.0, 1.2, 5.0),
             Band::low_shelf(80.0, 0.7, -4.0),
             Band::high_shelf(6000.0, 0.7, 3.0),
         ])
-        .to_chain(FS);
+        .to_chain(FS)
+    }
 
+    #[test]
+    fn biquad_chain_matches_its_own_convolution() {
+        // Direct processing matches convolution-with-IR within f64 tolerance
+        // (IIR + non-associative float => close, not bit-exact).
+        let mut chain = demo_eq();
         let input = pseudo_random(1024);
         // IR longer than the input -> compared indices are truncation-free.
         let residual = lti_residual(&mut chain, &input, 2048);
         assert!(residual < 1e-9, "LTI residual too large: {residual}");
+    }
+
+    #[test]
+    fn biquad_chain_is_homogeneous() {
+        // process(k*x) == k*process(x): scaling property of a linear system.
+        let mut chain = demo_eq();
+        let input = pseudo_random(1024);
+        for k in [-3.0, 0.5, 7.5, 1000.0] {
+            let r = homogeneity_residual(&mut chain, &input, k);
+            // Tolerance scales with k (errors are relative to signal magnitude).
+            assert!(r < 1e-9 * k.abs().max(1.0), "homogeneity residual {r} at k={k}");
+        }
+    }
+
+    #[test]
+    fn biquad_chain_is_time_invariant() {
+        // Delaying the input by N delays the output by N.
+        let mut chain = demo_eq();
+        let input = pseudo_random(1024);
+        let r = time_invariance_residual(&mut chain, &input, 137);
+        assert!(r < 1e-9, "time-invariance residual {r}");
     }
 
     #[test]

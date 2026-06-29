@@ -108,21 +108,35 @@ and `graphic-eq.toml` (30-band). Routing presets: `stereo`, `mono`,
 Per output channel: `gain_db`, `delay_ms`/`delay_cm`, `invert`, `mute`,
 parametric `eq` bands, a 30-band `graphic_eq`, and a `crossover`.
 
-## Correctness: convolution proofs
+## Correctness: convolution + LTI verification
 
 Because high fidelity demands it, the DSP core is verified, not just hoped at.
-Every linear time-invariant block is checked against convolution — its defining
-operation:
+The blocks are **IIR** (Direct-Form-II-Transposed biquads and cascades), so
+verification is done against convolution — an LTI system's defining operation —
+*within numerical tolerance*, not bit-exactly:
 
-1. capture the block's impulse response,
-2. assert direct processing of an arbitrary signal **exactly equals**
-   convolving that signal with the IR (proves it's truly LTI and self-consistent),
-3. assert the **DTFT of the IR matches the analytic transfer function** derived
-   from the coefficients (time-domain ↔ frequency-domain agreement).
+1. capture the block's impulse response (IR);
+2. assert direct processing of an arbitrary signal **matches** convolving that
+   signal with the IR **within `f64` precision** — proving self-consistency
+   (compared only over output indices the captured IR fully covers, so IIR-tail
+   truncation can't skew it);
+3. assert the **DTFT of the IR matches the analytic transfer function** from the
+   coefficients (time-domain ↔ frequency-domain agreement, to a dB tolerance);
+4. because self-consistency alone wouldn't catch a hidden nonlinearity (e.g. a
+   saturation bug that only bites at high amplitude), also assert the two
+   defining LTI properties directly: **homogeneity** (`process(k·x) == k·process(x)`)
+   and **time-invariance** (delaying the input delays the output).
 
-The `yscale_dsp::verify` module exposes these primitives so you can convolution-
-test your own configs. (Convolution only characterizes LTI systems; generators,
-dither, and mute toggling are validated by other means.)
+> On exactness: the recursive filter and the convolution sum evaluate
+> products/sums in different orders, and `f64` addition isn't associative — so
+> they agree to ~1e-9, never bit-for-bit. Fixed-point cores *can* be bit-exact,
+> but only if the test's convolution mirrors the quantization/saturation exactly.
+
+The `yscale_dsp::verify` module exposes all of these primitives
+(`lti_residual`, `dtft_magnitude`, `homogeneity_residual`,
+`time_invariance_residual`) so you can verify your own configs. (Convolution only
+characterizes LTI systems; generators, dither, and mute toggling are validated by
+other means.)
 
 ## Roadmap
 
