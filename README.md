@@ -182,6 +182,13 @@ UPnP control app (BubbleUPnP, mconnect, upplay, Kodi…) cast to the **mediapi**
 renderer. The engine captures the loopback (`plughw:Loopback,1,0`) as its source
 — so the stream gets the full DSP — with the DAC as the single clock master.
 
+You can also play **any stream URL directly**: pick the **Stream URL** source (or
+`POST /api/play {"url":"…"}`) with an HTTP(S)/HLS/DASH/`file://` URL — web radio,
+or a yscale-media track's bit-perfect `…/api/v1/mediafile/:id/direct` URL. The
+server decodes it with GStreamer into the same loopback → DSP → DAC path. This
+is the foundation of the **yscale playback-endpoint** model (see
+[`yscale-media` PR: playback endpoints](https://github.com/Yscale-sh/yscale-media/pull/6)).
+
 ## Roadmap
 
 - **Streamer UI** — make the web UI itself a UPnP control point (browse the

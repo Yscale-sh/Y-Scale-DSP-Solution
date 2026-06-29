@@ -49,6 +49,16 @@ export function useDspApi() {
     )
   }
 
+  async function playUrl(url) {
+    return jsonOrThrow(
+      await fetch('api/play', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url }),
+      }),
+    )
+  }
+
   async function refreshStatus() {
     try {
       const res = await fetch('api/status')
@@ -124,5 +134,5 @@ export function useDspApi() {
     }
   }
 
-  return { meters, status, wsState, getConfig, putConfig, postSource, refreshStatus, start, stop }
+  return { meters, status, wsState, getConfig, putConfig, postSource, playUrl, refreshStatus, start, stop }
 }

@@ -15,10 +15,12 @@ echo snd-aloop | sudo tee /etc/modules-load.d/snd-aloop.conf >/dev/null
 sudo modprobe snd-aloop || true
 aplay -l | grep -qi loopback && echo "   loopback card present" || { echo "   ERROR: no Loopback card"; exit 1; }
 
-echo ">> gmediarender + gstreamer codecs"
+echo ">> gmediarender + gstreamer (DLNA renderer, gst-launch for URL playback, codecs)"
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  gmediarender gstreamer1.0-alsa gstreamer1.0-plugins-base gstreamer1.0-plugins-good >/dev/null
+  gmediarender gstreamer1.0-tools gstreamer1.0-alsa \
+  gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad gstreamer1.0-libav >/dev/null
 echo "   installed $(gmediarender --version 2>/dev/null | head -1 || echo gmediarender)"
 
 echo ">> configure renderer: name=mediapi, output -> loopback"

@@ -2,7 +2,7 @@
 import { ref, reactive, computed } from 'vue'
 import { lin2db, clamp, fmtDb } from '../lib/dsp.js'
 
-const emit = defineEmits(['play', 'stop'])
+const emit = defineEmits(['play', 'play-url', 'stop'])
 defineProps({
   nowPlaying: { type: String, default: '' },
 })
@@ -15,6 +15,7 @@ const SOURCES = [
   { id: 'impulse', label: 'Impulse' },
   { id: 'file', label: 'File' },
   { id: 'capture', label: 'DLNA / Stream In' },
+  { id: 'url', label: 'Stream URL' },
 ]
 
 const CAPTURE_DEVICE = 'plughw:Loopback,1,0'
@@ -30,11 +31,12 @@ const p = reactive({
   periodMs: 500,
   path: '',
   fileLoop: true,
+  url: '',
 })
 
 const ampDb = computed(() => lin2db(amp.value))
 const isHot = computed(() => amp.value > 0.2)
-const usesAmp = computed(() => kind.value !== 'file' && kind.value !== 'capture')
+const usesAmp = computed(() => !['file', 'capture', 'url'].includes(kind.value))
 const ampFill = computed(() => `${Math.sqrt(clamp(amp.value, 0, 1)) * 100}%`)
 
 function setAmpFromSlider(e) {
@@ -68,6 +70,12 @@ function buildSpec() {
 const label = computed(() => SOURCES.find((s) => s.id === kind.value)?.label || kind.value)
 
 function play() {
+  if (kind.value === 'url') {
+    const url = p.url.trim()
+    if (!url) return
+    emit('play-url', { url })
+    return
+  }
   if (kind.value === 'file' && !p.path.trim()) return
   emit('play', { spec: buildSpec(), label: label.value })
 }
@@ -85,10 +93,10 @@ function stop() {
       </div>
       <div
         v-if="nowPlaying"
-        class="flex items-center gap-2 px-3 py-1.5 rounded-full border border-[color-mix(in_oklab,var(--color-signal)_40%,transparent)] bg-[color-mix(in_oklab,var(--color-signal)_10%,transparent)]"
+        class="flex items-center gap-2 px-3 py-1.5 rounded-full border border-[color-mix(in_oklab,var(--color-signal)_40%,transparent)] bg-[color-mix(in_oklab,var(--color-signal)_10%,transparent)] max-w-full"
       >
-        <span class="w-1.5 h-1.5 rounded-full bg-signal dot-live" style="color: var(--color-signal)" />
-        <span class="readout text-[11px] tracking-wide text-signal">{{ nowPlaying }}</span>
+        <span class="w-1.5 h-1.5 rounded-full bg-signal dot-live flex-none" style="color: var(--color-signal)" />
+        <span class="readout text-[11px] tracking-wide text-signal truncate max-w-[260px]" :title="nowPlaying">{{ nowPlaying }}</span>
       </div>
       <div v-else class="readout text-[11px] tracking-[0.16em] text-faint uppercase">— idle —</div>
     </header>
@@ -168,6 +176,26 @@ function stop() {
             </p>
             <p class="readout text-[10px] text-faint tracking-[0.12em] mt-1.5">
               ALSA loopback · {{ CAPTURE_DEVICE }}
+            </p>
+          </div>
+
+          <div v-else-if="kind === 'url'">
+            <label class="block max-w-xl">
+              <span class="eyebrow block mb-1">Stream URL · HTTP(S) / HLS / DASH</span>
+              <input
+                class="num"
+                type="url"
+                inputmode="url"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+                placeholder="https://stream… or a yscale-media track URL"
+                v-model="p.url"
+                @keydown.enter.prevent="play"
+              />
+            </label>
+            <p class="readout text-[10px] text-faint tracking-[0.12em] mt-1.5">
+              Decoded straight into the DSP · web radio &amp; yscale-media
             </p>
           </div>
 

@@ -20,11 +20,17 @@ use axum::{
 };
 use clap::Parser;
 use rust_embed::RustEmbed;
+use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use yscale_engine::{spawn_engine, Config, EngineHandle, SourceSpec};
+
+/// ALSA loopback the URL/DLNA players feed; the engine captures the other end.
+const LOOPBACK_PLAYBACK: &str = "plughw:Loopback,0,0";
+const LOOPBACK_CAPTURE: &str = "plughw:Loopback,1,0";
 
 #[derive(RustEmbed)]
 #[folder = "../../web/dist"]
@@ -51,6 +57,16 @@ struct Cli {
 struct AppState {
     engine: Arc<EngineHandle>,
     config: Arc<Mutex<Config>>,
+    /// The current URL-stream player process (gst-play feeding the loopback).
+    player: Arc<Mutex<Option<Child>>>,
+}
+
+/// Kill the running URL player, if any.
+fn stop_player(s: &AppState) {
+    if let Some(mut child) = s.player.lock().unwrap().take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
 
 #[tokio::main]
@@ -75,11 +91,13 @@ async fn main() -> Result<()> {
     let state = AppState {
         engine,
         config: Arc::new(Mutex::new(config)),
+        player: Arc::new(Mutex::new(None)),
     };
 
     let app = Router::new()
         .route("/api/config", get(get_config).put(put_config))
         .route("/api/source", post(post_source))
+        .route("/api/play", post(post_play))
         .route("/api/status", get(get_status))
         .route("/ws", get(ws_handler))
         .fallback(static_handler)
@@ -124,11 +142,68 @@ async fn post_source(
     State(s): State<AppState>,
     Json(spec): Json<SourceSpec>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    // Any explicit source selection ends URL streaming.
+    stop_player(&s);
     let source = spec
         .build(s.engine.sample_rate, s.engine.n_in)
         .map_err(AppError::bad)?;
     s.engine.swap_source(source);
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct PlayReq {
+    url: String,
+}
+
+/// Play any HTTP(S)/HLS/DASH/file stream URL THROUGH the DSP: a `gst-play`
+/// process decodes it into the ALSA loopback and the engine captures that as
+/// its source. This is what lets the Pi natively play yscale-media streams (and
+/// web radio) on the hardware DSP.
+async fn post_play(
+    State(s): State<AppState>,
+    Json(req): Json<PlayReq>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let url = req.url.trim().to_string();
+    if !(url.starts_with("http://") || url.starts_with("https://") || url.starts_with("file://")) {
+        return Err(AppError::bad(anyhow::anyhow!(
+            "url must start with http://, https:// or file://"
+        )));
+    }
+    stop_player(&s);
+    // gst-launch with an explicit decode→convert→resample→alsasink pipeline
+    // (uridecodebin handles http/https/hls/dash/file + most codecs; its dynamic
+    // pads are auto-linked by the parser). Feeds the loopback the engine captures.
+    let child = Command::new("gst-launch-1.0")
+        .arg("uridecodebin")
+        .arg(format!("uri={url}"))
+        .arg("!")
+        .arg("audioconvert")
+        .arg("!")
+        .arg("audioresample")
+        .arg("!")
+        .arg("alsasink")
+        .arg(format!("device={LOOPBACK_PLAYBACK}"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| {
+            AppError::bad(anyhow::anyhow!(
+                "could not start player (is gstreamer1.0-tools installed?): {e}"
+            ))
+        })?;
+    *s.player.lock().unwrap() = Some(child);
+
+    // Route the loopback through the DSP.
+    let cap = SourceSpec::Capture {
+        device: LOOPBACK_CAPTURE.to_string(),
+    }
+    .build(s.engine.sample_rate, s.engine.n_in)
+    .map_err(AppError::bad)?;
+    s.engine.swap_source(cap);
+
+    Ok(Json(serde_json::json!({ "ok": true, "playing": url })))
 }
 
 async fn get_status(State(s): State<AppState>) -> Json<serde_json::Value> {

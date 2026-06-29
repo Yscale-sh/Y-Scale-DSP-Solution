@@ -157,6 +157,16 @@ async function onPlay({ spec, label }) {
     showToast(e.message || 'Source failed', 'error')
   }
 }
+async function onPlayUrl({ url }) {
+  try {
+    const res = await api.playUrl(url)
+    const playing = res?.playing || url
+    nowPlaying.value = `Stream · ${playing}`
+    showToast(`Streaming ${playing}`, 'ok')
+  } catch (e) {
+    showToast(e.message || 'Stream failed', 'error')
+  }
+}
 async function onStop() {
   try {
     await api.postSource({ kind: 'silence' })
@@ -294,7 +304,7 @@ onBeforeUnmount(() => api.stop())
     <!-- main grid -->
     <div v-else class="grid lg:grid-cols-12 gap-5">
       <div class="lg:col-span-8">
-        <SourceBar :now-playing="nowPlaying" @play="onPlay" @stop="onStop" />
+        <SourceBar :now-playing="nowPlaying" @play="onPlay" @play-url="onPlayUrl" @stop="onStop" />
       </div>
       <div class="lg:col-span-4">
         <MasterMeters :meters="meters" :channels="meterChannels" :ws-state="wsState" />
