@@ -1,0 +1,391 @@
+@import "tailwindcss";
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Y//SCALE DSP — "PHOSPHOR LAB" design system
+   Dark oscilloscope-instrument aesthetic. Phosphor mint signal, hot-red danger,
+   per-channel accents, glass panels, grain + glow atmosphere.
+   Tailwind v4 CSS-first config via @theme.
+─────────────────────────────────────────────────────────────────────────── */
+@theme {
+  --font-display: "Chakra Petch", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-void: #050709;
+  --color-abyss: #080b0e;
+  --color-surface: #0c1117;
+  --color-surface-2: #111a22;
+  --color-edge: #1c2a33;
+  --color-hair: rgba(125, 175, 185, 0.10);
+
+  --color-ink: #ecf4f5;
+  --color-dim: #93a8ad;
+  --color-faint: #5b6d72;
+
+  --color-signal: #1ff0c8;
+  --color-signal-deep: #0bb89a;
+  --color-hot: #ff3b66;
+  --color-amber: #ffc24b;
+  --color-cool: #5bb6ff;
+  --color-violet: #b48bff;
+
+  --color-meter-lo: #2fe188;
+  --color-meter-mid: #ffc24b;
+  --color-meter-hi: #ff3b66;
+}
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    font-family: var(--font-display);
+    background: var(--color-void);
+    color: var(--color-ink);
+    font-feature-settings: "tnum" 1, "ss01" 1;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+
+  /* Atmospheric backdrop: layered phosphor glow + deep void + fine grid. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    background:
+      radial-gradient(120% 80% at 12% -10%, rgba(31, 240, 200, 0.10), transparent 55%),
+      radial-gradient(90% 70% at 100% 0%, rgba(91, 182, 255, 0.07), transparent 50%),
+      radial-gradient(120% 120% at 50% 120%, rgba(180, 139, 255, 0.06), transparent 60%),
+      linear-gradient(180deg, #070a0d 0%, #050709 60%, #04060a 100%);
+  }
+
+  /* Grain overlay for texture. */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    pointer-events: none;
+    opacity: 0.04;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-signal) 40%, transparent);
+    color: #fff;
+  }
+
+  ::-webkit-scrollbar {
+    height: 10px;
+    width: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--color-signal) 25%, var(--color-edge));
+    border-radius: 99px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--color-signal) 45%, var(--color-edge));
+    background-clip: padding-box;
+  }
+}
+
+@layer components {
+  /* ── Panels ──────────────────────────────────────────────────────────── */
+  .panel {
+    position: relative;
+    border-radius: 16px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0) 30%),
+      linear-gradient(180deg, var(--color-surface), var(--color-abyss));
+    border: 1px solid var(--color-hair);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.04) inset,
+      0 24px 60px -30px rgba(0, 0, 0, 0.9);
+  }
+  .panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent, var(--color-signal)) 35%, transparent), transparent 40%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  /* ── Eyebrow / section labels ────────────────────────────────────────── */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--color-faint);
+    font-weight: 500;
+  }
+
+  .readout {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* ── Buttons / chips ─────────────────────────────────────────────────── */
+  .chip {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border-radius: 10px;
+    border: 1px solid var(--color-hair);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0));
+    color: var(--color-dim);
+    transition: all 0.16s ease;
+    cursor: pointer;
+    user-select: none;
+  }
+  .chip:hover {
+    color: var(--color-ink);
+    border-color: color-mix(in oklab, var(--accent, var(--color-signal)) 40%, var(--color-edge));
+    transform: translateY(-1px);
+  }
+  .chip:active {
+    transform: translateY(0);
+  }
+  .chip.is-active {
+    color: var(--color-void);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent, var(--color-signal)) 100%, white 8%), var(--accent, var(--color-signal)));
+    border-color: transparent;
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--accent, var(--color-signal)) 60%, transparent),
+      0 8px 24px -10px color-mix(in oklab, var(--accent, var(--color-signal)) 80%, transparent);
+  }
+
+  .btn-ghost {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-dim);
+    border: 1px solid var(--color-hair);
+    border-radius: 8px;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .btn-ghost:hover {
+    color: var(--color-ink);
+    border-color: var(--color-edge);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .toggle {
+    position: relative;
+    width: 46px;
+    height: 24px;
+    border-radius: 99px;
+    background: var(--color-abyss);
+    border: 1px solid var(--color-edge);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex: none;
+  }
+  .toggle::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 99px;
+    background: var(--color-faint);
+    transition: all 0.2s cubic-bezier(0.4, 1.4, 0.5, 1);
+  }
+  .toggle.is-on {
+    background: color-mix(in oklab, var(--accent, var(--color-signal)) 28%, var(--color-abyss));
+    border-color: color-mix(in oklab, var(--accent, var(--color-signal)) 60%, transparent);
+  }
+  .toggle.is-on::after {
+    left: 24px;
+    background: var(--accent, var(--color-signal));
+    box-shadow: 0 0 12px color-mix(in oklab, var(--accent, var(--color-signal)) 80%, transparent);
+  }
+  .toggle.is-danger.is-on {
+    background: color-mix(in oklab, var(--color-hot) 30%, var(--color-abyss));
+    border-color: color-mix(in oklab, var(--color-hot) 60%, transparent);
+  }
+  .toggle.is-danger.is-on::after {
+    background: var(--color-hot);
+    box-shadow: 0 0 12px color-mix(in oklab, var(--color-hot) 80%, transparent);
+  }
+
+  /* ── Numeric input ───────────────────────────────────────────────────── */
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    background: var(--color-abyss);
+    border: 1px solid var(--color-hair);
+    border-radius: 8px;
+    color: var(--color-ink);
+    padding: 6px 8px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    width: 100%;
+  }
+  .num:focus {
+    outline: none;
+    border-color: color-mix(in oklab, var(--accent, var(--color-signal)) 55%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent, var(--color-signal)) 18%, transparent);
+  }
+
+  .select {
+    font-family: var(--font-display);
+    font-weight: 600;
+    background: var(--color-abyss);
+    border: 1px solid var(--color-hair);
+    border-radius: 8px;
+    color: var(--color-ink);
+    padding: 7px 10px;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%2393a8ad' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+    padding-right: 26px;
+  }
+  .select:focus {
+    outline: none;
+    border-color: color-mix(in oklab, var(--accent, var(--color-signal)) 55%, transparent);
+  }
+  .select option {
+    background: var(--color-surface);
+    color: var(--color-ink);
+  }
+}
+
+/* ── Range slider (horizontal faders) ──────────────────────────────────── */
+input[type="range"].fader {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"].fader::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 99px;
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--accent, var(--color-signal)) 70%, transparent) var(--fill, 0%), transparent var(--fill, 0%)),
+    var(--color-abyss);
+  border: 1px solid var(--color-hair);
+}
+input[type="range"].fader::-moz-range-track {
+  height: 6px;
+  border-radius: 99px;
+  background: var(--color-abyss);
+  border: 1px solid var(--color-hair);
+}
+input[type="range"].fader::-moz-range-progress {
+  height: 6px;
+  border-radius: 99px;
+  background: color-mix(in oklab, var(--accent, var(--color-signal)) 70%, transparent);
+}
+input[type="range"].fader::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  margin-top: -8px;
+  width: 16px;
+  height: 22px;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #f4fdfb, #cfe9e4);
+  border: 1px solid color-mix(in oklab, var(--accent, var(--color-signal)) 60%, #000);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.4),
+    0 0 14px color-mix(in oklab, var(--accent, var(--color-signal)) 65%, transparent),
+    0 4px 8px rgba(0, 0, 0, 0.5);
+  transition: transform 0.12s ease;
+}
+input[type="range"].fader::-webkit-slider-thumb:active {
+  transform: scale(1.12);
+}
+input[type="range"].fader::-moz-range-thumb {
+  width: 16px;
+  height: 22px;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #f4fdfb, #cfe9e4);
+  border: 1px solid color-mix(in oklab, var(--accent, var(--color-signal)) 60%, #000);
+  box-shadow: 0 0 14px color-mix(in oklab, var(--accent, var(--color-signal)) 65%, transparent);
+}
+input[type="range"].fader.is-hot::-webkit-slider-thumb {
+  border-color: var(--color-hot);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.4),
+    0 0 16px color-mix(in oklab, var(--color-hot) 75%, transparent);
+}
+
+/* ── Keyframes ─────────────────────────────────────────────────────────── */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  50% {
+    opacity: 0.5;
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+@keyframes scan {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(2000%); }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(18px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.rise {
+  opacity: 0;
+  animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.dot-live {
+  animation: pulse-dot 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+    opacity: 1;
+  }
+  .dot-live {
+    animation: none;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.05ms !important;
+  }
+}

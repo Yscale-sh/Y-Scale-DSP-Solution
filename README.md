@@ -138,10 +138,29 @@ The `yscale_dsp::verify` module exposes all of these primitives
 characterizes LTI systems; generators, dither, and mute toggling are validated by
 other means.)
 
+## Web UI
+
+A bold, dark "Phosphor Lab" Vue 3 + Vite + Tailwind control surface
+(`web/`), served by the **`yscale-server`** crate — an `axum` server with live
+control over the LAN. Open `http://<pi>:8080` from any device (phone included):
+source/transport, live WebSocket VU meters, routing presets, two channel strips
+(gain/mute/invert/delay), parametric EQ with a draggable-node response curve, a
+30-band graphic EQ, and crossovers — all applied live (debounced `PUT
+/api/config` hot-swaps the DSP graph without dropping audio).
+
+```bash
+# build the UI + server and deploy as a systemd service on the Pi
+./deploy/deploy-web.sh mediapi.local
+# then open http://mediapi.local:8080
+```
+
+API: `GET/PUT /api/config`, `POST /api/source`, `GET /api/status`, `GET /ws`
+(meter stream). The built UI (`web/dist`) is embedded into the server binary via
+`rust-embed`, so deployment is a single file. Rebuild the UI with
+`cd web && npm install && npm run build`.
+
 ## Roadmap
 
-- **Web UI** — Vue 3 + Tailwind, served by a Rust (`axum`) server with a
-  WebSocket for live control, broadcasting on the LAN.
 - **DLNA** — UPnP renderer so you can stream a source file from any device.
 - **Multi-Pi** — slave several Pi Zero 2 W as N synchronized DACs/receivers in
   one enclosure, word-clocked together.

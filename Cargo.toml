@@ -4,6 +4,7 @@ members = [
     "crates/yscale-dsp",
     "crates/yscale-engine",
     "crates/yscale-cli",
+    "crates/yscale-server",
 ]
 
 [workspace.package]

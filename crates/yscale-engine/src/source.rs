@@ -2,6 +2,7 @@
 //! testing) plus WAV file playback. Every source produces interleaved `f64`
 //! samples in `[-1, 1]`.
 
+use serde::{Deserialize, Serialize};
 use std::f64::consts::TAU;
 use std::path::Path;
 
@@ -364,6 +365,117 @@ impl Source for WavFile {
             self.pos += sc;
         }
         frames
+    }
+}
+
+/// A silent source (all zeros) — keeps the engine running with no signal.
+pub struct Silence {
+    fs: u32,
+    channels: usize,
+}
+
+impl Silence {
+    pub fn new(fs: u32, channels: usize) -> Self {
+        Self { fs, channels }
+    }
+}
+
+impl Source for Silence {
+    fn sample_rate(&self) -> u32 {
+        self.fs
+    }
+    fn channels(&self) -> usize {
+        self.channels
+    }
+    fn fill(&mut self, buf: &mut [f64], frames: usize) -> usize {
+        buf[..frames * self.channels].iter_mut().for_each(|s| *s = 0.0);
+        frames
+    }
+}
+
+fn def_freq() -> f64 {
+    1000.0
+}
+fn def_amp() -> f64 {
+    0.25
+}
+fn def_f1() -> f64 {
+    20.0
+}
+fn def_f2() -> f64 {
+    20000.0
+}
+fn def_dur() -> f64 {
+    10.0
+}
+
+/// Declarative source selector for the control API (JSON-tagged by `kind`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SourceSpec {
+    Silence,
+    Sine {
+        #[serde(default = "def_freq")]
+        freq: f64,
+        #[serde(default = "def_amp")]
+        amp: f64,
+    },
+    Sweep {
+        #[serde(default = "def_f1")]
+        f1: f64,
+        #[serde(default = "def_f2")]
+        f2: f64,
+        #[serde(default = "def_dur")]
+        dur: f64,
+        #[serde(default = "def_amp")]
+        amp: f64,
+        #[serde(default)]
+        looping: bool,
+    },
+    Pink {
+        #[serde(default = "def_amp")]
+        amp: f64,
+    },
+    White {
+        #[serde(default = "def_amp")]
+        amp: f64,
+    },
+    Impulse {
+        #[serde(default)]
+        period_ms: Option<f64>,
+        #[serde(default = "def_amp")]
+        amp: f64,
+    },
+    File {
+        path: String,
+        #[serde(default)]
+        looping: bool,
+    },
+}
+
+impl SourceSpec {
+    /// Instantiate the source for the given sample rate and channel count.
+    pub fn build(&self, fs: u32, channels: usize) -> anyhow::Result<Box<dyn Source>> {
+        Ok(match self {
+            SourceSpec::Silence => Box::new(Silence::new(fs, channels)),
+            SourceSpec::Sine { freq, amp } => Box::new(Sine::new(fs, channels, *freq, *amp)),
+            SourceSpec::Sweep {
+                f1,
+                f2,
+                dur,
+                amp,
+                looping,
+            } => Box::new(LogSweep::new(fs, channels, *f1, *f2, *dur, *amp, *looping)),
+            SourceSpec::Pink { amp } => Box::new(PinkNoise::new(fs, channels, *amp, 0xC0FFEE)),
+            SourceSpec::White { amp } => Box::new(WhiteNoise::new(fs, channels, *amp, 0xBEEF)),
+            SourceSpec::Impulse { period_ms, amp } => {
+                let period = period_ms.map(|ms| (ms * 1e-3 * fs as f64) as u64);
+                Box::new(Impulse::new(fs, channels, *amp, period))
+            }
+            SourceSpec::File { path, looping } => {
+                Box::new(WavFile::open(Path::new(path), channels, *looping)?)
+            }
+        })
     }
 }
 
