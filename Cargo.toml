@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/yscale-dsp",
+    "crates/yscale-engine",
+    "crates/yscale-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Jake Nesler <jakenesler@gmail.com>"]
+repository = "https://github.com/jakenesler/Y-Scale-DSP-Solution"
+rust-version = "1.75"
+
+[workspace.dependencies]
+yscale-dsp = { path = "crates/yscale-dsp", version = "0.1.0" }
+
+# Release profile tuned for the Pi Zero 2 W: small, fast, low jitter.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+# panic = "abort" left as default (unwind) so `cargo test --release` stays usable.

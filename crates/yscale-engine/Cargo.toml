@@ -1,0 +1,17 @@
+[package]
+name = "yscale-engine"
+description = "Real-time audio engine for Y-Scale-DSP: ALSA I/O, signal generators, WAV playback, and a config-driven DSP graph."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+yscale-dsp = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+hound = "3.5"
+anyhow = "1"
+alsa = "0.9"

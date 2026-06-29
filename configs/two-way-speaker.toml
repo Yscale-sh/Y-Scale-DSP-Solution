@@ -1,0 +1,47 @@
+# Active 2-way crossover on the DAC's two RCA outputs, for bench-testing a
+# single speaker: LEFT RCA -> woofer amp, RIGHT RCA -> tweeter amp.
+#
+# The mono routing sums the source and feeds both output channels; channel 0
+# is low-passed (woofer) and channel 1 high-passed (tweeter) at 2.2 kHz with
+# 24 dB/oct Linkwitz-Riley filters. Tweak gains/EQ/delay while you measure.
+
+sample_rate = 96000
+device = "hw:CARD=BossDAC,DEV=0"
+format = "s32_le"
+period_frames = 1024
+buffer_frames = 4096
+
+[routing]
+preset = "mono"     # sum L+R, feed both outputs
+
+# ---- Output 0: WOOFER (Left RCA) ----
+[[channel]]
+name = "Woofer"
+gain_db = 0.0
+delay_cm = 0.0       # acoustic offset from the listening axis
+invert = false
+
+[[channel.eq]]
+kind = "peaking"     # tame a baffle-step / room mode
+freq = 120
+q = 1.5
+gain_db = 2.0
+
+[channel.crossover]
+kind = "linkwitz_riley"
+role = "low_pass"
+freq = 2200
+order = 4            # 24 dB/oct (LR4)
+
+# ---- Output 1: TWEETER (Right RCA) ----
+[[channel]]
+name = "Tweeter"
+gain_db = -3.0       # pad the (usually hotter) tweeter
+delay_cm = 4.0       # time-align: tweeter voice coil ~4 cm ahead of woofer
+invert = false       # flip to true if the off-axis null sits at the crossover
+
+[channel.crossover]
+kind = "linkwitz_riley"
+role = "high_pass"
+freq = 2200
+order = 4

@@ -1,0 +1,13 @@
+[package]
+name = "yscale-dsp"
+description = "Slim, high-fidelity, composable audio DSP core: RBJ biquad EQ, parametric & 30-band graphic EQ, Linkwitz-Riley/Butterworth crossovers, fractional-sample time alignment, and channel routing."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+categories = ["multimedia::audio"]
+keywords = ["dsp", "audio", "eq", "crossover", "biquad"]
+
+[dependencies]

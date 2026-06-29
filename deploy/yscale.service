@@ -1,0 +1,26 @@
+# systemd unit for running Y-Scale-DSP headless on the Pi.
+#
+# NOTE: until the web/control server lands, the engine runs one fixed source,
+# so this is mainly useful for an always-on test signal (e.g. pink noise for
+# break-in) or as the template the upcoming `yscale-server` will replace.
+#
+# Install:  sudo cp yscale.service /etc/systemd/system/ && sudo systemctl daemon-reload
+# Enable:   sudo systemctl enable --now yscale
+
+[Unit]
+Description=Y-Scale-DSP headless audio engine
+After=sound.target
+
+[Service]
+Type=simple
+User=jake
+ExecStart=/usr/local/bin/yscale --config /etc/yscale/yscale.toml pink --amp 0.2
+# Low-latency scheduling (needs the rtprio/memlock limits below).
+Nice=-10
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

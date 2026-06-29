@@ -1,0 +1,17 @@
+# Minimal stereo pass-through: audio in -> audio out, no processing.
+# Good first sanity check that the DAC plays cleanly.
+
+sample_rate = 48000
+device = "hw:CARD=BossDAC,DEV=0"
+format = "s32_le"
+period_frames = 1024
+buffer_frames = 4096
+
+[routing]
+preset = "stereo"   # stereo | mono | left_to_both | right_to_both | swap | custom
+
+[[channel]]
+name = "Left"
+
+[[channel]]
+name = "Right"
