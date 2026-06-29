@@ -138,11 +138,61 @@ The `yscale_dsp::verify` module exposes all of these primitives
 characterizes LTI systems; generators, dither, and mute toggling are validated by
 other means.)
 
+## Web UI
+
+A bold, dark "Phosphor Lab" Vue 3 + Vite + Tailwind control surface
+(`web/`), served by the **`yscale-server`** crate — an `axum` server with live
+control over the LAN. Open `http://<pi>:8080` from any device (phone included):
+source/transport, live WebSocket VU meters, routing presets, two channel strips
+(gain/mute/invert/delay), parametric EQ with a draggable-node response curve, a
+30-band graphic EQ, and crossovers — all applied live (debounced `PUT
+/api/config` hot-swaps the DSP graph without dropping audio).
+
+```bash
+# build the UI + server and deploy as a systemd service on the Pi
+./deploy/deploy-web.sh mediapi.local
+# then open http://mediapi.local:8080
+```
+
+API: `GET/PUT /api/config`, `POST /api/source`, `GET /api/status`, `GET /ws`
+(meter stream). The built UI (`web/dist`) is embedded into the server binary via
+`rust-embed`, so deployment is a single file. Rebuild the UI with
+`cd web && npm install && npm run build`.
+
+## DLNA / network streaming (through the DSP)
+
+Turn the Pi into a **streamer-DSP**: a UPnP/DLNA renderer whose audio is run
+through your EQ/crossover/routing before the DAC. The chain is
+
+```
+control app ──directs──▶ mediapi renderer ──pulls──▶ from your media server
+                              │  (gmediarender)
+                              ▼
+                         ALSA snd-aloop loopback ──▶ yscale capture source ──▶ DSP ──▶ DAC
+```
+
+One-time setup:
+
+```bash
+./deploy/setup-dlna.sh mediapi.local   # snd-aloop + gmediarender ("mediapi"), output -> loopback
+```
+
+To play: in the web UI choose the **DLNA / Stream In** source, then from any
+UPnP control app (BubbleUPnP, mconnect, upplay, Kodi…) cast to the **mediapi**
+renderer. The engine captures the loopback (`plughw:Loopback,1,0`) as its source
+— so the stream gets the full DSP — with the DAC as the single clock master.
+
+You can also play **any stream URL directly**: pick the **Stream URL** source (or
+`POST /api/play {"url":"…"}`) with an HTTP(S)/HLS/DASH/`file://` URL — web radio,
+or a yscale-media track's bit-perfect `…/api/v1/mediafile/:id/direct` URL. The
+server decodes it with GStreamer into the same loopback → DSP → DAC path. This
+is the foundation of the **yscale playback-endpoint** model (see
+[`yscale-media` PR: playback endpoints](https://github.com/Yscale-sh/yscale-media/pull/6)).
+
 ## Roadmap
 
-- **Web UI** — Vue 3 + Tailwind, served by a Rust (`axum`) server with a
-  WebSocket for live control, broadcasting on the LAN.
-- **DLNA** — UPnP renderer so you can stream a source file from any device.
+- **Streamer UI** — make the web UI itself a UPnP control point (browse the
+  media server + pick tracks in-app, no separate controller).
 - **Multi-Pi** — slave several Pi Zero 2 W as N synchronized DACs/receivers in
   one enclosure, word-clocked together.
 - DSP: more crossover alignments (Bessel), FIR/linear-phase option, RTA, and

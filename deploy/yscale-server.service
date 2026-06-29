@@ -1,0 +1,27 @@
+# systemd unit for the Y-Scale-DSP web control server.
+# Serves the Vue UI + live DSP control on the LAN (http://<pi>:8080) and owns
+# the DAC. Don't run the `yscale` CLI at the same time (exclusive hw access).
+#
+# Install:
+#   sudo cp yscale-server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now yscale-server
+
+[Unit]
+Description=Y-Scale-DSP web control server
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jake
+# Starts silent; the UI selects the source. Add --config /etc/yscale/<f>.toml to
+# boot with a preset DSP graph.
+ExecStart=/usr/local/bin/yscale-server --bind 0.0.0.0:8080
+Nice=-5
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -3,14 +3,14 @@
 
 use crate::output::SampleFormat;
 use anyhow::{bail, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use yscale_dsp::crossover::{self, CrossoverKind};
 use yscale_dsp::eq::{Band, BandKind, GraphicEq30};
 use yscale_dsp::{BiquadChain, ChannelMatrix, ChannelStrip, Pipeline};
 
 /// Top-level configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default = "default_sample_rate")]
@@ -63,7 +63,7 @@ impl Default for Config {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FormatCfg {
     S16Le,
@@ -80,7 +80,7 @@ impl From<FormatCfg> for SampleFormat {
 }
 
 /// Input-to-output routing.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Routing {
     pub preset: RoutingPreset,
@@ -97,7 +97,7 @@ impl Default for Routing {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RoutingPreset {
     #[default]
@@ -110,7 +110,7 @@ pub enum RoutingPreset {
 }
 
 /// One output channel's processing.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChannelCfg {
     pub name: Option<String>,
@@ -135,7 +135,7 @@ pub struct ChannelCfg {
     pub crossover: Option<CrossoverCfg>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EqBandCfg {
     pub kind: BandKindCfg,
@@ -150,7 +150,7 @@ fn default_q() -> f64 {
     0.707
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BandKindCfg {
     Peaking,
@@ -178,7 +178,7 @@ impl From<BandKindCfg> for BandKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrossoverCfg {
     pub kind: XoverKindCfg,
@@ -187,14 +187,14 @@ pub struct CrossoverCfg {
     pub order: usize,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum XoverKindCfg {
     Butterworth,
     LinkwitzRiley,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum XoverRole {
     LowPass,
