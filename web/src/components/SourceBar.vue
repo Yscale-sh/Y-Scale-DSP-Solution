@@ -14,7 +14,10 @@ const SOURCES = [
   { id: 'white', label: 'White' },
   { id: 'impulse', label: 'Impulse' },
   { id: 'file', label: 'File' },
+  { id: 'capture', label: 'DLNA / Stream In' },
 ]
+
+const CAPTURE_DEVICE = 'plughw:Loopback,1,0'
 
 const kind = ref('sine')
 const amp = ref(0.03) // SAFE low default ≈ −30 dBFS
@@ -31,7 +34,7 @@ const p = reactive({
 
 const ampDb = computed(() => lin2db(amp.value))
 const isHot = computed(() => amp.value > 0.2)
-const usesAmp = computed(() => kind.value !== 'file')
+const usesAmp = computed(() => kind.value !== 'file' && kind.value !== 'capture')
 const ampFill = computed(() => `${Math.sqrt(clamp(amp.value, 0, 1)) * 100}%`)
 
 function setAmpFromSlider(e) {
@@ -55,6 +58,8 @@ function buildSpec() {
       return { kind: 'impulse', period_ms: +p.periodMs, amp: +amp.value }
     case 'file':
       return { kind: 'file', path: p.path, looping: !!p.fileLoop }
+    case 'capture':
+      return { kind: 'capture', device: CAPTURE_DEVICE }
     default:
       return { kind: 'silence' }
   }
@@ -154,6 +159,16 @@ function stop() {
             >
               ⟳ Loop
             </button>
+          </div>
+
+          <div v-else-if="kind === 'capture'" class="pt-1.5">
+            <p class="readout text-[12px] text-dim leading-relaxed">
+              Play to the <span class="text-signal">“mediapi”</span> renderer from any UPnP/DLNA app — the stream runs
+              through your DSP.
+            </p>
+            <p class="readout text-[10px] text-faint tracking-[0.12em] mt-1.5">
+              ALSA loopback · {{ CAPTURE_DEVICE }}
+            </p>
           </div>
 
           <p v-else class="readout text-[12px] text-dim pt-2">

@@ -2,6 +2,8 @@
 //! testing) plus WAV file playback. Every source produces interleaved `f64`
 //! samples in `[-1, 1]`.
 
+use alsa::pcm::{Access, Format, HwParams, PCM};
+use alsa::{Direction, ValueOr};
 use serde::{Deserialize, Serialize};
 use std::f64::consts::TAU;
 use std::path::Path;
@@ -409,6 +411,82 @@ fn def_dur() -> f64 {
     10.0
 }
 
+/// Captures audio from an ALSA device (e.g. an `snd-aloop` loopback) so a DLNA
+/// renderer / network stream can be fed THROUGH the DSP. Non-blocking: when no
+/// data is available it yields silence, so the realtime engine never stalls.
+pub struct Capture {
+    pcm: PCM,
+    fs: u32,
+    channels: usize,
+    tmp: Vec<i32>,
+}
+
+impl Capture {
+    pub fn open(device: &str, fs: u32, channels: usize) -> anyhow::Result<Self> {
+        let pcm = PCM::new(device, Direction::Capture, true)?; // non-blocking
+        {
+            let hwp = HwParams::any(&pcm)?;
+            hwp.set_channels(channels as u32)?;
+            hwp.set_rate(fs, ValueOr::Nearest)?;
+            hwp.set_access(Access::RWInterleaved)?;
+            hwp.set_format(Format::s32())?;
+            hwp.set_buffer_size_near(16384)?;
+            hwp.set_period_size_near(1024, ValueOr::Nearest)?;
+            pcm.hw_params(&hwp)?;
+        }
+        pcm.prepare()?;
+        let _ = pcm.start();
+        Ok(Self {
+            pcm,
+            fs,
+            channels,
+            tmp: Vec::new(),
+        })
+    }
+}
+
+impl Source for Capture {
+    fn sample_rate(&self) -> u32 {
+        self.fs
+    }
+    fn channels(&self) -> usize {
+        self.channels
+    }
+    fn fill(&mut self, buf: &mut [f64], frames: usize) -> usize {
+        const SCALE: f64 = 1.0 / (i32::MAX as f64);
+        let ch = self.channels;
+        let need = frames * ch;
+        if self.tmp.len() < need {
+            self.tmp.resize(need, 0);
+        }
+        // Default to silence — covers no-data / errors so the engine never stalls.
+        buf[..need].iter_mut().for_each(|s| *s = 0.0);
+        let io = match self.pcm.io_i32() {
+            Ok(io) => io,
+            Err(_) => return frames,
+        };
+        match io.readi(&mut self.tmp[..need]) {
+            Ok(n) => {
+                let got = n * ch;
+                for i in 0..got {
+                    buf[i] = self.tmp[i] as f64 * SCALE;
+                }
+            }
+            Err(e) => {
+                // EAGAIN (no data yet) -> silence; xrun/suspend -> recover + restart.
+                if self.pcm.try_recover(e, true).is_ok() {
+                    let _ = self.pcm.start();
+                }
+            }
+        }
+        frames
+    }
+}
+
+fn def_loopback() -> String {
+    "plughw:Loopback,1,0".to_string()
+}
+
 /// Declarative source selector for the control API (JSON-tagged by `kind`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -451,6 +529,11 @@ pub enum SourceSpec {
         #[serde(default)]
         looping: bool,
     },
+    /// Capture from an ALSA device (DLNA/network stream via an snd-aloop loopback).
+    Capture {
+        #[serde(default = "def_loopback")]
+        device: String,
+    },
 }
 
 impl SourceSpec {
@@ -475,6 +558,7 @@ impl SourceSpec {
             SourceSpec::File { path, looping } => {
                 Box::new(WavFile::open(Path::new(path), channels, *looping)?)
             }
+            SourceSpec::Capture { device } => Box::new(Capture::open(device, fs, channels)?),
         })
     }
 }

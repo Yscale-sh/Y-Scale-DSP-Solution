@@ -15,4 +15,6 @@ pub use config::Config;
 pub use control::{spawn as spawn_engine, EngineHandle, Meters};
 pub use engine::{run, stop_flag};
 pub use output::SampleFormat;
-pub use source::{Impulse, LogSweep, PinkNoise, Silence, Sine, Source, SourceSpec, WavFile, WhiteNoise};
+pub use source::{
+    Capture, Impulse, LogSweep, PinkNoise, Silence, Sine, Source, SourceSpec, WavFile, WhiteNoise,
+};

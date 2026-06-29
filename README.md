@@ -159,9 +159,33 @@ API: `GET/PUT /api/config`, `POST /api/source`, `GET /api/status`, `GET /ws`
 `rust-embed`, so deployment is a single file. Rebuild the UI with
 `cd web && npm install && npm run build`.
 
+## DLNA / network streaming (through the DSP)
+
+Turn the Pi into a **streamer-DSP**: a UPnP/DLNA renderer whose audio is run
+through your EQ/crossover/routing before the DAC. The chain is
+
+```
+control app ──directs──▶ mediapi renderer ──pulls──▶ from your media server
+                              │  (gmediarender)
+                              ▼
+                         ALSA snd-aloop loopback ──▶ yscale capture source ──▶ DSP ──▶ DAC
+```
+
+One-time setup:
+
+```bash
+./deploy/setup-dlna.sh mediapi.local   # snd-aloop + gmediarender ("mediapi"), output -> loopback
+```
+
+To play: in the web UI choose the **DLNA / Stream In** source, then from any
+UPnP control app (BubbleUPnP, mconnect, upplay, Kodi…) cast to the **mediapi**
+renderer. The engine captures the loopback (`plughw:Loopback,1,0`) as its source
+— so the stream gets the full DSP — with the DAC as the single clock master.
+
 ## Roadmap
 
-- **DLNA** — UPnP renderer so you can stream a source file from any device.
+- **Streamer UI** — make the web UI itself a UPnP control point (browse the
+  media server + pick tracks in-app, no separate controller).
 - **Multi-Pi** — slave several Pi Zero 2 W as N synchronized DACs/receivers in
   one enclosure, word-clocked together.
 - DSP: more crossover alignments (Bessel), FIR/linear-phase option, RTA, and
