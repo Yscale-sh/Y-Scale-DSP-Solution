@@ -229,8 +229,12 @@ impl From<BandKindCfg> for BandKind {
 pub struct CrossoverCfg {
     pub kind: XoverKindCfg,
     pub role: XoverRole,
+    /// Cutoff in Hz. For `band_pass` this is the low edge (the high-pass cutoff).
     pub freq: f64,
     pub order: usize,
+    /// High edge (low-pass cutoff) in Hz — only used when `role = band_pass`.
+    #[serde(default)]
+    pub freq_high: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -238,6 +242,7 @@ pub struct CrossoverCfg {
 pub enum XoverKindCfg {
     Butterworth,
     LinkwitzRiley,
+    Bessel,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -245,6 +250,7 @@ pub enum XoverKindCfg {
 pub enum XoverRole {
     LowPass,
     HighPass,
+    BandPass,
 }
 
 impl Config {
@@ -404,10 +410,16 @@ fn build_strip(c: &ChannelCfg, fs: f64) -> Result<ChannelStrip> {
         let kind = match x.kind {
             XoverKindCfg::Butterworth => CrossoverKind::Butterworth,
             XoverKindCfg::LinkwitzRiley => CrossoverKind::LinkwitzRiley,
+            XoverKindCfg::Bessel => CrossoverKind::Bessel,
         };
         let chain = match x.role {
             XoverRole::LowPass => crossover::lowpass(kind, x.order, x.freq, fs),
             XoverRole::HighPass => crossover::highpass(kind, x.order, x.freq, fs),
+            XoverRole::BandPass => {
+                // freq = low edge (high-pass), freq_high = high edge (low-pass).
+                let f_high = x.freq_high.unwrap_or((fs / 2.0).min(20_000.0)).max(x.freq);
+                crossover::bandpass(kind, x.order, x.freq, f_high, fs)
+            }
         };
         filters.extend(&chain);
     }
