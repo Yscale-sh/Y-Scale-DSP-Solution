@@ -47,6 +47,12 @@ export function useDspApi() {
   const stopPlayback = () => send('api/stop', 'POST', {})
   const seek = (position) => send('api/seek', 'POST', { position })
 
+  // ── Presets / scenes ─────────────────────────────────────────────────────────
+  const getPresets = () => getJson('api/presets')
+  const savePreset = (name) => send('api/presets/save', 'POST', { name })
+  const loadPreset = (name) => send('api/presets/load', 'POST', { name })
+  const deletePreset = (name) => send('api/presets/delete', 'POST', { name })
+
   // ── Master volume ────────────────────────────────────────────────────────────
   async function setVolume(body) {
     const v = await send('api/volume', 'PUT', body)
@@ -152,6 +158,7 @@ export function useDspApi() {
     getConfig, putConfig,
     postSource, playUrl, pause, stopPlayback, seek,
     setVolume, refreshNow, refreshStatus,
+    getPresets, savePreset, loadPreset, deletePreset,
     start, stop,
   }
 }
