@@ -127,19 +127,53 @@ export function biquadMagDb(c, freq, fs) {
   return 20 * Math.log10(Math.max(num / den, 1e-7))
 }
 
-// Analog magnitude (dB) of a crossover at frequency f.
-// Butterworth: -3 dB at fc, n*6 dB/oct. Linkwitz-Riley: cascade of two
-// Butterworth(n/2), so -6 dB at fc with matching n*6 dB/oct asymptote.
-export function crossoverMagDb(xover, freq) {
-  if (!xover) return 0
-  const fc = xover.freq
-  const order = clamp(xover.order || 1, 1, 8)
-  const ratio = xover.role === 'low_pass' ? freq / fc : fc / freq
-  if (xover.kind === 'linkwitz_riley') {
+// -3 dB-normalized Bessel sections (mirrors the Rust `bessel_sections`):
+// [Q, frequency-scaling-factor] per 2nd-order section, plus a 1st-order FSF.
+const BESSEL = {
+  1: { biquads: [], first: 1.0 },
+  2: { biquads: [[0.5773, 1.2736]], first: null },
+  3: { biquads: [[0.691, 1.4524]], first: 1.327 },
+  4: { biquads: [[0.5219, 1.4192], [0.8055, 1.5912]], first: null },
+}
+
+// Magnitude (dB) of one crossover role (low_pass | high_pass) at freq f.
+function roleMagDb(kind, order, role, fc, freq, fs) {
+  if (kind === 'bessel') {
+    const s = BESSEL[clamp(Math.round(order), 1, 4)]
+    let db = 0
+    for (const [q, fsf] of s.biquads) {
+      const f0 = role === 'low_pass' ? fc * fsf : fc / fsf
+      db += biquadMagDb(biquadCoeffs(role, f0, q, 0, fs), freq, fs)
+    }
+    if (s.first != null) {
+      const f0 = role === 'low_pass' ? fc * s.first : fc / s.first
+      const ratio = role === 'low_pass' ? freq / f0 : f0 / freq
+      db += -10 * Math.log10(1 + ratio * ratio) // 1st-order section
+    }
+    return db
+  }
+  // Butterworth / Linkwitz-Riley closed form.
+  const ratio = role === 'low_pass' ? freq / fc : fc / freq
+  if (kind === 'linkwitz_riley') {
     const nb = order / 2
     return 2 * (-10 * Math.log10(1 + Math.pow(ratio, 2 * nb)))
   }
   return -10 * Math.log10(1 + Math.pow(ratio, 2 * order))
+}
+
+// Analog magnitude (dB) of a crossover at frequency f. Supports low/high/band
+// pass and Butterworth / Linkwitz-Riley / Bessel alignments.
+export function crossoverMagDb(xover, freq, fs = 48000) {
+  if (!xover) return 0
+  const order = clamp(xover.order || 1, 1, 8)
+  if (xover.role === 'band_pass') {
+    const hi = xover.freq_high || xover.freq * 8
+    return (
+      roleMagDb(xover.kind, order, 'high_pass', xover.freq, freq, fs) +
+      roleMagDb(xover.kind, order, 'low_pass', hi, freq, fs)
+    )
+  }
+  return roleMagDb(xover.kind, order, xover.role, xover.freq, freq, fs)
 }
 
 // Linear interpolation of a 30-band graphic-EQ contribution at frequency f (dB).
@@ -167,7 +201,7 @@ export function combinedMagDb(freq, bands, fs, crossover, graphicEq) {
     const g = bandUsesGain(band.kind) ? band.gain_db : 0
     db += biquadMagDb(biquadCoeffs(band.kind, band.freq, band.q, g, fs), freq, fs)
   }
-  if (crossover) db += crossoverMagDb(crossover, freq)
+  if (crossover) db += crossoverMagDb(crossover, freq, fs)
   if (graphicEq) db += graphicMagDb(graphicEq, freq)
   return db
 }

@@ -63,7 +63,13 @@ function makeChannel(src, i) {
     eq: Array.isArray(src?.eq) ? src.eq.map(makeBand) : [],
     graphic_eq: Array.isArray(src?.graphic_eq) ? padGraphic(src.graphic_eq) : null,
     crossover: src?.crossover
-      ? { kind: src.crossover.kind, role: src.crossover.role, freq: src.crossover.freq, order: src.crossover.order }
+      ? {
+          kind: src.crossover.kind,
+          role: src.crossover.role,
+          freq: src.crossover.freq,
+          order: src.crossover.order,
+          freq_high: src.crossover.freq_high ?? null,
+        }
       : null,
   }
 }
@@ -101,7 +107,11 @@ function buildPayload() {
             kind: ch.crossover.kind,
             role: ch.crossover.role,
             freq: r(clamp(ch.crossover.freq, 10, 20000), 2),
-            order: clamp(Math.round(ch.crossover.order), 1, 4),
+            order: clamp(Math.round(ch.crossover.order), 1, 8),
+            freq_high:
+              ch.crossover.role === 'band_pass' && ch.crossover.freq_high != null
+                ? r(clamp(ch.crossover.freq_high, 10, 20000), 2)
+                : null,
           }
         : null,
     })),
