@@ -1,10 +1,12 @@
 import { ref } from 'vue'
 
-// Same-origin DSP API + live meter WebSocket.
-// fetch URLs are relative so they work regardless of mount path.
+// Same-origin DSP + streamer API and the live WebSocket (meters + now-playing +
+// volume). fetch URLs are relative so they work regardless of mount path.
 export function useDspApi() {
   const meters = ref([]) // latest LINEAR peak per output channel
   const status = ref({ sample_rate: 0, n_in: 0, n_out: 0 })
+  const now = ref({ state: 'stopped', title: '', artist: '', album: '', art_url: '', position: 0, duration: 0, source: 'idle' })
+  const volume = ref({ pct: 45, db: -33, muted: false })
   const wsState = ref('connecting') // 'connecting' | 'live' | 'down'
 
   let ws = null
@@ -25,38 +27,44 @@ export function useDspApi() {
     return data
   }
 
-  async function getConfig() {
-    return jsonOrThrow(await fetch('api/config'))
+  const getJson = (path) => fetch(path).then(jsonOrThrow)
+  const send = (path, method, body) =>
+    fetch(path, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(jsonOrThrow)
+
+  // ── DSP graph ──────────────────────────────────────────────────────────────
+  const getConfig = () => getJson('api/config')
+  const putConfig = (cfg) => send('api/config', 'PUT', cfg)
+
+  // ── Sources / transport ─────────────────────────────────────────────────────
+  const postSource = (spec) => send('api/source', 'POST', spec)
+  const playUrl = (url, meta = {}) => send('api/play', 'POST', { url, ...meta })
+  const pause = (paused) => send('api/pause', 'POST', { paused })
+  const stopPlayback = () => send('api/stop', 'POST', {})
+  const seek = (position) => send('api/seek', 'POST', { position })
+
+  // ── Master volume ────────────────────────────────────────────────────────────
+  async function setVolume(body) {
+    const v = await send('api/volume', 'PUT', body)
+    if (v) volume.value = v
+    return v
   }
 
-  async function putConfig(cfg) {
-    return jsonOrThrow(
-      await fetch('api/config', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(cfg),
-      }),
-    )
-  }
-
-  async function postSource(spec) {
-    return jsonOrThrow(
-      await fetch('api/source', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(spec),
-      }),
-    )
-  }
-
-  async function playUrl(url) {
-    return jsonOrThrow(
-      await fetch('api/play', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ url }),
-      }),
-    )
+  async function refreshNow() {
+    try {
+      const d = await getJson('api/now')
+      if (d.now) now.value = d.now
+      if (d.volume) volume.value = d.volume
+      if (Array.isArray(d.meters)) meters.value = d.meters
+      if (typeof d.sample_rate === 'number') {
+        status.value = { sample_rate: d.sample_rate, n_in: d.n_in, n_out: d.n_out }
+      }
+    } catch {
+      /* ignore; WS is the primary feed */
+    }
   }
 
   async function refreshStatus() {
@@ -68,7 +76,7 @@ export function useDspApi() {
         if (Array.isArray(d.meters)) meters.value = d.meters
       }
     } catch {
-      /* ignore; WS is the primary feed */
+      /* ignore */
     }
   }
 
@@ -90,6 +98,8 @@ export function useDspApi() {
       try {
         const msg = JSON.parse(ev.data)
         if (msg && Array.isArray(msg.meters)) meters.value = msg.meters
+        if (msg && msg.now) now.value = msg.now
+        if (msg && msg.volume) volume.value = msg.volume
       } catch {
         /* ignore malformed frame */
       }
@@ -120,7 +130,7 @@ export function useDspApi() {
 
   function start() {
     alive = true
-    refreshStatus()
+    refreshNow()
     connectWs()
   }
 
@@ -134,5 +144,11 @@ export function useDspApi() {
     }
   }
 
-  return { meters, status, wsState, getConfig, putConfig, postSource, playUrl, refreshStatus, start, stop }
+  return {
+    meters, status, now, volume, wsState,
+    getConfig, putConfig,
+    postSource, playUrl, pause, stopPlayback, seek,
+    setVolume, refreshNow, refreshStatus,
+    start, stop,
+  }
 }
