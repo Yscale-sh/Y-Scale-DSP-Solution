@@ -5,6 +5,7 @@ import { ref } from 'vue'
 export function useDspApi() {
   const meters = ref([]) // latest LINEAR peak per output channel
   const gr = ref(0) // safety-limiter gain reduction (dB, >= 0)
+  const spectrum = ref([]) // RTA: per-band magnitude dBFS (30 ISO bands)
   const status = ref({ sample_rate: 0, n_in: 0, n_out: 0 })
   const now = ref({ state: 'stopped', title: '', artist: '', album: '', art_url: '', position: 0, duration: 0, source: 'idle' })
   const volume = ref({ pct: 45, db: -33, muted: false })
@@ -67,6 +68,7 @@ export function useDspApi() {
       if (d.volume) volume.value = d.volume
       if (Array.isArray(d.meters)) meters.value = d.meters
       if (typeof d.gr === 'number') gr.value = d.gr
+      if (Array.isArray(d.spectrum)) spectrum.value = d.spectrum
       if (typeof d.sample_rate === 'number') {
         status.value = { sample_rate: d.sample_rate, n_in: d.n_in, n_out: d.n_out }
       }
@@ -107,6 +109,7 @@ export function useDspApi() {
         const msg = JSON.parse(ev.data)
         if (msg && Array.isArray(msg.meters)) meters.value = msg.meters
         if (msg && typeof msg.gr === 'number') gr.value = msg.gr
+        if (msg && Array.isArray(msg.spectrum)) spectrum.value = msg.spectrum
         if (msg && msg.now) now.value = msg.now
         if (msg && msg.volume) volume.value = msg.volume
       } catch {
@@ -154,7 +157,7 @@ export function useDspApi() {
   }
 
   return {
-    meters, gr, status, now, volume, wsState,
+    meters, gr, spectrum, status, now, volume, wsState,
     getConfig, putConfig,
     postSource, playUrl, pause, stopPlayback, seek,
     setVolume, refreshNow, refreshStatus,

@@ -7,6 +7,7 @@
 //! live and ready for the next source.
 
 use crate::alsa_out::AlsaOutput;
+use crate::analyzer::Analyzer;
 use crate::config::Config;
 use crate::output::{Converter, SampleFormat};
 use crate::source::Source;
@@ -54,6 +55,8 @@ pub struct EngineHandle {
     meters: Arc<Meters>,
     /// Safety-limiter gain reduction (dB, >= 0), stored as `f32` bits.
     gr: Arc<AtomicU32>,
+    /// Live output spectrum analyzer (RTA).
+    analyzer: Arc<Analyzer>,
     join: Option<JoinHandle<()>>,
     pub n_in: usize,
     pub n_out: usize,
@@ -80,6 +83,10 @@ impl EngineHandle {
     /// Current safety-limiter gain reduction in dB (>= 0; 0 = not limiting).
     pub fn gain_reduction(&self) -> f32 {
         f32::from_bits(self.gr.load(Ordering::Relaxed))
+    }
+    /// Latest output spectrum: per-band magnitude in dBFS (30 ISO bands).
+    pub fn spectrum(&self) -> Vec<f32> {
+        self.analyzer.spectrum()
     }
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
@@ -137,17 +144,19 @@ pub fn spawn(config: &Config, source: Box<dyn Source>) -> Result<EngineHandle> {
     let meters = Arc::new(Meters::new(n_out));
     let gr = Arc::new(AtomicU32::new(0));
     let limiter = config.build_limiter(n_out);
+    let analyzer = Arc::new(Analyzer::start(config.sample_rate));
 
     let stop_t = stop.clone();
     let meters_t = meters.clone();
     let gr_t = gr.clone();
+    let analyzer_t = analyzer.clone();
     let dither = config.dither;
     let join = std::thread::Builder::new()
         .name("yscale-rt".into())
         .spawn(move || {
             rt_loop(
-                out, pipeline, source, rx, stop_t, meters_t, gr_t, limiter, frames, n_in, n_out,
-                format, dither,
+                out, pipeline, source, rx, stop_t, meters_t, gr_t, analyzer_t, limiter, frames,
+                n_in, n_out, format, dither,
             );
         })?;
 
@@ -165,6 +174,7 @@ pub fn spawn(config: &Config, source: Box<dyn Source>) -> Result<EngineHandle> {
         stop,
         meters,
         gr,
+        analyzer,
         join: Some(join),
         n_in,
         n_out,
@@ -182,6 +192,7 @@ fn rt_loop(
     stop: Arc<AtomicBool>,
     meters: Arc<Meters>,
     gr: Arc<AtomicU32>,
+    analyzer: Arc<Analyzer>,
     mut limiter: Limiter,
     frames: usize,
     n_in: usize,
@@ -228,6 +239,15 @@ fn rt_loop(
         // (what actually reaches the DAC) and publish the gain reduction.
         limiter.process(&mut out_buf, frames);
         gr.store((limiter.gain_reduction_db() as f32).to_bits(), Ordering::Relaxed);
+
+        // Feed the RTA a mono sum of the (post-limiter) output.
+        for f in 0..frames {
+            let mut s = 0.0;
+            for c in 0..n_out {
+                s += out_buf[f * n_out + c];
+            }
+            analyzer.push((s / n_out as f64) as f32);
+        }
 
         // Per-channel peak with decay, for the UI meters.
         for p in peak.iter_mut() {
