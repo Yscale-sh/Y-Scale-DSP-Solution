@@ -16,11 +16,12 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use yscale_dsp::{Limiter, Pipeline};
+use yscale_dsp::{BassManager, Limiter, Pipeline};
 
 enum Command {
     SwapPipeline(Box<Pipeline>),
     SwapSource(Box<dyn Source>),
+    SwapBass(Box<BassManager>),
 }
 
 /// Per-output-channel peak meters (linear 0..1), updated by the RT thread.
@@ -74,6 +75,12 @@ impl EngineHandle {
     pub fn swap_source(&self, s: Box<dyn Source>) {
         if let Ok(tx) = self.tx.lock() {
             let _ = tx.send(Command::SwapSource(s));
+        }
+    }
+    /// Replace the bass-management stage live.
+    pub fn swap_bass(&self, b: BassManager) {
+        if let Ok(tx) = self.tx.lock() {
+            let _ = tx.send(Command::SwapBass(Box::new(b)));
         }
     }
     /// Current per-output-channel peak levels (linear).
@@ -144,6 +151,7 @@ pub fn spawn(config: &Config, source: Box<dyn Source>) -> Result<EngineHandle> {
     let meters = Arc::new(Meters::new(n_out));
     let gr = Arc::new(AtomicU32::new(0));
     let limiter = config.build_limiter(n_out);
+    let bass = config.build_bass(n_out);
     let analyzer = Arc::new(Analyzer::start(config.sample_rate));
 
     let stop_t = stop.clone();
@@ -155,8 +163,8 @@ pub fn spawn(config: &Config, source: Box<dyn Source>) -> Result<EngineHandle> {
         .name("yscale-rt".into())
         .spawn(move || {
             rt_loop(
-                out, pipeline, source, rx, stop_t, meters_t, gr_t, analyzer_t, limiter, frames,
-                n_in, n_out, format, dither,
+                out, pipeline, source, rx, stop_t, meters_t, gr_t, analyzer_t, bass, limiter,
+                frames, n_in, n_out, format, dither,
             );
         })?;
 
@@ -193,6 +201,7 @@ fn rt_loop(
     meters: Arc<Meters>,
     gr: Arc<AtomicU32>,
     analyzer: Arc<Analyzer>,
+    mut bass: BassManager,
     mut limiter: Limiter,
     frames: usize,
     n_in: usize,
@@ -222,6 +231,9 @@ fn rt_loop(
                         source = s;
                     }
                 }
+                Command::SwapBass(b) => {
+                    bass = *b;
+                }
             }
         }
 
@@ -233,6 +245,9 @@ fn rt_loop(
         }
 
         pipeline.process_interleaved(&in_buf, &mut out_buf, frames);
+
+        // Bass management (mono-bass crossover) before the safety limiter.
+        bass.process(&mut out_buf, frames);
 
         // Final safety stage: brickwall-limit the output so it can never clip
         // the DAC, whatever EQ/gain is upstream. Meter the post-limiter signal
