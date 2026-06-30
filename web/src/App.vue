@@ -8,13 +8,14 @@ import VolumeBar from './components/VolumeBar.vue'
 import PlayerSources from './components/PlayerSources.vue'
 import SourceBar from './components/SourceBar.vue'
 import PresetBar from './components/PresetBar.vue'
+import Spectrum from './components/Spectrum.vue'
 import MasterMeters from './components/MasterMeters.vue'
 import RoutingPanel from './components/RoutingPanel.vue'
 import ChannelStrip from './components/ChannelStrip.vue'
 import Toast from './components/Toast.vue'
 
 const api = useDspApi()
-const { meters, gr, status, now, volume, wsState } = api
+const { meters, gr, spectrum, status, now, volume, wsState } = api
 
 const ACCENTS = ['var(--color-signal)', 'var(--color-violet)', 'var(--color-cool)', 'var(--color-amber)']
 const defaultName = (i) => ['Left', 'Right'][i] ?? `Channel ${i + 1}`
@@ -419,6 +420,10 @@ onBeforeUnmount(() => api.stop())
       </div>
       <div class="lg:col-span-4">
         <MasterMeters :meters="meters" :channels="meterChannels" :ws-state="wsState" :gr="gr" />
+      </div>
+
+      <div class="lg:col-span-12">
+        <Spectrum :spectrum="spectrum" />
       </div>
 
       <div class="lg:col-span-12">

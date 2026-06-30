@@ -5,6 +5,7 @@
 //! [`Pipeline`](yscale_dsp::Pipeline).
 
 pub mod alsa_out;
+pub mod analyzer;
 pub mod config;
 pub mod control;
 pub mod engine;

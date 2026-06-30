@@ -331,6 +331,7 @@ fn now_snapshot(s: &AppState) -> Value {
         "volume": s.volume.state(),
         "meters": s.engine.meters(),
         "gr": s.engine.gain_reduction(),
+        "spectrum": s.engine.spectrum(),
         "sample_rate": s.engine.sample_rate,
         "n_in": s.engine.n_in,
         "n_out": s.engine.n_out,
@@ -449,7 +450,9 @@ async fn ws_loop(mut socket: WebSocket, s: AppState) {
         let gr = s.engine.gain_reduction();
         let payload = if n % 6 == 0 {
             let now = s.player.as_ref().map(|p| p.snapshot()).unwrap_or_default();
-            json!({ "meters": s.engine.meters(), "gr": gr, "now": now, "volume": s.volume.state() })
+            json!({ "meters": s.engine.meters(), "gr": gr, "spectrum": s.engine.spectrum(), "now": now, "volume": s.volume.state() })
+        } else if n % 3 == 0 {
+            json!({ "meters": s.engine.meters(), "gr": gr, "spectrum": s.engine.spectrum() })
         } else {
             json!({ "meters": s.engine.meters(), "gr": gr })
         };
