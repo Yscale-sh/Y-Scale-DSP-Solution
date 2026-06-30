@@ -14,15 +14,17 @@
 //!   GET  /api/status   sample rate / channels / live meters
 //!   GET  /ws           WebSocket: live meters + now-playing + volume
 
+mod firs;
 mod player;
 mod presets;
 mod volume;
 
 use anyhow::Result;
 use axum::{
+    body::Bytes,
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        Query, State,
     },
     http::{header, StatusCode, Uri},
     response::{IntoResponse, Response},
@@ -77,6 +79,20 @@ struct AppState {
     volume: Arc<Volume>,
     presets: Arc<presets::Presets>,
     active_preset: Arc<Mutex<Option<String>>>,
+    firs: Arc<firs::Firs>,
+}
+
+/// Load every channel's referenced FIR (best-effort) and swap the engine's FIR
+/// bank. Called on startup and whenever the config or stored FIRs change.
+fn apply_firs(s: &AppState) {
+    let per_channel: Vec<Option<Vec<f64>>> = {
+        let cfg = s.config.lock().unwrap();
+        cfg.channel
+            .iter()
+            .map(|c| c.fir.as_ref().and_then(|n| s.firs.load(n).ok()))
+            .collect()
+    };
+    s.engine.swap_fir(per_channel);
 }
 
 /// Swap the engine source. If the new source opens an exclusive ALSA device
@@ -147,7 +163,9 @@ async fn main() -> Result<()> {
         volume,
         presets: Arc::new(presets::Presets::new()),
         active_preset: Arc::new(Mutex::new(None)),
+        firs: Arc::new(firs::Firs::new()),
     };
+    apply_firs(&state);
 
     let app = Router::new()
         .route("/api/config", get(get_config).put(put_config))
@@ -162,6 +180,9 @@ async fn main() -> Result<()> {
         .route("/api/presets/save", post(save_preset))
         .route("/api/presets/load", post(load_preset))
         .route("/api/presets/delete", post(delete_preset))
+        .route("/api/firs", get(get_firs))
+        .route("/api/firs/upload", post(upload_fir))
+        .route("/api/firs/delete", post(delete_fir))
         .route("/api/status", get(get_status))
         .route("/ws", get(ws_handler))
         .fallback(static_handler)
@@ -198,6 +219,7 @@ async fn put_config(
     s.engine.swap_pipeline(pipeline);
     s.engine.swap_bass(new.build_bass(s.engine.n_out));
     *s.config.lock().unwrap() = new;
+    apply_firs(&s);
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -411,6 +433,7 @@ async fn load_preset(
     s.engine.swap_pipeline(pipeline);
     s.engine.swap_bass(cfg.build_bass(s.engine.n_out));
     *s.config.lock().unwrap() = cfg;
+    apply_firs(&s);
     *s.active_preset.lock().unwrap() = Some(req.name.trim().to_string());
     Ok(Json(json!({ "ok": true })))
 }
@@ -424,6 +447,41 @@ async fn delete_preset(
     if active.as_deref() == Some(req.name.trim()) {
         *active = None;
     }
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct UploadQ {
+    name: String,
+}
+
+async fn get_firs(State(s): State<AppState>) -> Json<Value> {
+    let firs: Vec<Value> = s
+        .firs
+        .list()
+        .into_iter()
+        .map(|(name, taps)| json!({ "name": name, "taps": taps }))
+        .collect();
+    Json(json!({ "firs": firs }))
+}
+
+/// Upload a FIR (raw WAV or text body) under `?name=`, then re-apply.
+async fn upload_fir(
+    State(s): State<AppState>,
+    Query(q): Query<UploadQ>,
+    body: Bytes,
+) -> Result<Json<Value>, AppError> {
+    let taps = s.firs.save(&q.name, &body).map_err(AppError::bad)?;
+    apply_firs(&s);
+    Ok(Json(json!({ "ok": true, "name": q.name.trim(), "taps": taps })))
+}
+
+async fn delete_fir(
+    State(s): State<AppState>,
+    Json(req): Json<PresetReq>,
+) -> Result<Json<Value>, AppError> {
+    s.firs.delete(&req.name).map_err(AppError::bad)?;
+    apply_firs(&s);
     Ok(Json(json!({ "ok": true })))
 }
 

@@ -1176,6 +1176,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "hound",
  "mime_guess",
  "rust-embed",
  "serde",
