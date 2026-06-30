@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use yscale_dsp::crossover::{self, CrossoverKind};
 use yscale_dsp::eq::{Band, BandKind, GraphicEq30};
-use yscale_dsp::{BiquadChain, ChannelMatrix, ChannelStrip, Limiter, Pipeline};
+use yscale_dsp::{BassManager, BiquadChain, ChannelMatrix, ChannelStrip, Limiter, Pipeline};
 
 /// Top-level configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +33,50 @@ pub struct Config {
     /// Final-stage brickwall safety limiter (on by default).
     #[serde(default)]
     pub limiter: LimiterCfg,
+    /// Bass management (mono-bass crossover; off by default).
+    #[serde(default)]
+    pub bass: BassCfg,
+}
+
+/// Bass management: split the low end at `freq`, sum it to mono, and either fold
+/// it back into the mains (stereo) or route it to a dedicated `sub_channel`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BassCfg {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_bass_freq")]
+    pub freq: f64,
+    #[serde(default = "default_bass_order")]
+    pub order: usize,
+    /// Infrasonic (rumble) high-pass in Hz; 0 disables it.
+    #[serde(default)]
+    pub rumble_hz: f64,
+    /// Dedicated sub output channel index (needs >2 output channels).
+    #[serde(default)]
+    pub sub_channel: Option<usize>,
+    #[serde(default)]
+    pub sub_gain_db: f64,
+}
+
+fn default_bass_freq() -> f64 {
+    80.0
+}
+fn default_bass_order() -> usize {
+    4
+}
+
+impl Default for BassCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            freq: default_bass_freq(),
+            order: default_bass_order(),
+            rumble_hz: 0.0,
+            sub_channel: None,
+            sub_gain_db: 0.0,
+        }
+    }
 }
 
 /// Final-stage safety limiter so the DSP can never clip the DAC, regardless of
@@ -105,6 +149,7 @@ impl Default for Config {
             routing: Routing::default(),
             channel: Vec::new(),
             limiter: LimiterCfg::default(),
+            bass: BassCfg::default(),
         }
     }
 }
@@ -280,6 +325,20 @@ impl Config {
         } else {
             self.channel.len()
         }
+    }
+
+    /// Build the bass-management stage for `n_out` output channels.
+    pub fn build_bass(&self, n_out: usize) -> BassManager {
+        BassManager::new(
+            self.sample_rate as f64,
+            n_out,
+            self.bass.enabled,
+            self.bass.freq,
+            self.bass.order,
+            self.bass.rumble_hz,
+            self.bass.sub_channel,
+            self.bass.sub_gain_db,
+        )
     }
 
     /// Build the final-stage safety limiter for `n_out` output channels.

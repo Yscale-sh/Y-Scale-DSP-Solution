@@ -9,6 +9,7 @@ import PlayerSources from './components/PlayerSources.vue'
 import SourceBar from './components/SourceBar.vue'
 import PresetBar from './components/PresetBar.vue'
 import Spectrum from './components/Spectrum.vue'
+import BassPanel from './components/BassPanel.vue'
 import MasterMeters from './components/MasterMeters.vue'
 import RoutingPanel from './components/RoutingPanel.vue'
 import ChannelStrip from './components/ChannelStrip.vue'
@@ -34,6 +35,7 @@ const cfg = reactive({
   dither: false,
   routing: { preset: 'stereo', matrix: null },
   channels: [],
+  bass: { enabled: false, freq: 80, order: 4, rumble_hz: 0 },
 })
 
 const CAPTURE_DEVICE = 'plughw:Loopback,1,0'
@@ -90,6 +92,12 @@ function buildPayload() {
     buffer_frames: cfg.buffer_frames,
     dither: !!cfg.dither,
     routing: { preset: cfg.routing.preset, matrix: cfg.routing.matrix ?? null },
+    bass: {
+      enabled: !!cfg.bass.enabled,
+      freq: r(clamp(cfg.bass.freq, 20, 500), 2),
+      order: clamp(Math.round(cfg.bass.order), 2, 8),
+      rumble_hz: r(Math.max(0, cfg.bass.rumble_hz), 2),
+    },
     channel: cfg.channels.map((ch) => ({
       name: ch.name ?? null,
       gain_db: r(clamp(ch.gain_db, -60, 12), 2),
@@ -280,6 +288,10 @@ async function hydrate() {
   cfg.dither = !!fetched.dither
   cfg.routing.preset = fetched.routing?.preset ?? 'stereo'
   cfg.routing.matrix = fetched.routing?.matrix ?? null
+  cfg.bass.enabled = !!fetched.bass?.enabled
+  cfg.bass.freq = fetched.bass?.freq ?? 80
+  cfg.bass.order = fetched.bass?.order ?? 4
+  cfg.bass.rumble_hz = fetched.bass?.rumble_hz ?? 0
 
   const chans = Array.isArray(fetched.channel) ? fetched.channel : []
   if (chans.length === 0) {
@@ -428,6 +440,10 @@ onBeforeUnmount(() => api.stop())
 
       <div class="lg:col-span-12">
         <RoutingPanel v-model="cfg.routing.preset" />
+      </div>
+
+      <div class="lg:col-span-12">
+        <BassPanel :bass="cfg.bass" />
       </div>
 
       <div v-for="(ch, i) in cfg.channels" :key="ch._id" class="lg:col-span-6">

@@ -16,6 +16,7 @@
 //! - [`matrix`] — N-in/N-out channel routing (mono/left/right/swap/custom).
 //! - [`strip`] / [`pipeline`] — per-channel processing chains wired into a graph.
 
+pub mod bass;
 pub mod biquad;
 pub mod crossover;
 pub mod delay;
@@ -26,6 +27,7 @@ pub mod pipeline;
 pub mod strip;
 pub mod verify;
 
+pub use bass::BassManager;
 pub use biquad::{Biquad, BiquadChain, Coeffs};
 pub use crossover::{Crossover, CrossoverKind};
 pub use delay::Delay;

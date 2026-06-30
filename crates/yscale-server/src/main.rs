@@ -196,6 +196,7 @@ async fn put_config(
         )));
     }
     s.engine.swap_pipeline(pipeline);
+    s.engine.swap_bass(new.build_bass(s.engine.n_out));
     *s.config.lock().unwrap() = new;
     Ok(Json(json!({ "ok": true })))
 }
@@ -408,6 +409,7 @@ async fn load_preset(
         )));
     }
     s.engine.swap_pipeline(pipeline);
+    s.engine.swap_bass(cfg.build_bass(s.engine.n_out));
     *s.config.lock().unwrap() = cfg;
     *s.active_preset.lock().unwrap() = Some(req.name.trim().to_string());
     Ok(Json(json!({ "ok": true })))
