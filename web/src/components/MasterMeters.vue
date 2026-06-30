@@ -6,6 +6,7 @@ const props = defineProps({
   meters: { type: Array, default: () => [] }, // LINEAR peaks
   channels: { type: Array, default: () => [] }, // [{ name, accent }]
   wsState: { type: String, default: 'connecting' },
+  gr: { type: Number, default: 0 }, // safety-limiter gain reduction (dB)
 })
 
 const FLOOR = -60
@@ -83,7 +84,13 @@ const stateLabel = { live: 'LIVE', connecting: 'LINK…', down: 'OFFLINE' }
         <p class="eyebrow">Master · Output</p>
         <h2 class="font-display font-bold text-lg tracking-wide text-ink mt-0.5">LIVE METERS</h2>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2.5">
+        <span
+          v-if="gr > 0.1"
+          class="readout text-[10px] tracking-[0.1em] font-semibold px-2 py-1 rounded-md dot-live"
+          style="color: var(--color-amber); border: 1px solid color-mix(in oklab, var(--color-amber) 45%, transparent); background: color-mix(in oklab, var(--color-amber) 12%, transparent)"
+          title="Safety limiter active — output is being kept under the ceiling"
+        >LIM −{{ gr.toFixed(1) }} dB</span>
         <span
           class="w-2 h-2 rounded-full"
           :class="{

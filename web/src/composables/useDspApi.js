@@ -4,6 +4,7 @@ import { ref } from 'vue'
 // volume). fetch URLs are relative so they work regardless of mount path.
 export function useDspApi() {
   const meters = ref([]) // latest LINEAR peak per output channel
+  const gr = ref(0) // safety-limiter gain reduction (dB, >= 0)
   const status = ref({ sample_rate: 0, n_in: 0, n_out: 0 })
   const now = ref({ state: 'stopped', title: '', artist: '', album: '', art_url: '', position: 0, duration: 0, source: 'idle' })
   const volume = ref({ pct: 45, db: -33, muted: false })
@@ -59,6 +60,7 @@ export function useDspApi() {
       if (d.now) now.value = d.now
       if (d.volume) volume.value = d.volume
       if (Array.isArray(d.meters)) meters.value = d.meters
+      if (typeof d.gr === 'number') gr.value = d.gr
       if (typeof d.sample_rate === 'number') {
         status.value = { sample_rate: d.sample_rate, n_in: d.n_in, n_out: d.n_out }
       }
@@ -98,6 +100,7 @@ export function useDspApi() {
       try {
         const msg = JSON.parse(ev.data)
         if (msg && Array.isArray(msg.meters)) meters.value = msg.meters
+        if (msg && typeof msg.gr === 'number') gr.value = msg.gr
         if (msg && msg.now) now.value = msg.now
         if (msg && msg.volume) volume.value = msg.volume
       } catch {
@@ -145,7 +148,7 @@ export function useDspApi() {
   }
 
   return {
-    meters, status, now, volume, wsState,
+    meters, gr, status, now, volume, wsState,
     getConfig, putConfig,
     postSource, playUrl, pause, stopPlayback, seek,
     setVolume, refreshNow, refreshStatus,

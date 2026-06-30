@@ -321,6 +321,7 @@ fn now_snapshot(s: &AppState) -> Value {
         "now": now,
         "volume": s.volume.state(),
         "meters": s.engine.meters(),
+        "gr": s.engine.gain_reduction(),
         "sample_rate": s.engine.sample_rate,
         "n_in": s.engine.n_in,
         "n_out": s.engine.n_out,
@@ -362,6 +363,7 @@ async fn get_status(State(s): State<AppState>) -> Json<Value> {
         "n_in": s.engine.n_in,
         "n_out": s.engine.n_out,
         "meters": s.engine.meters(),
+        "gr": s.engine.gain_reduction(),
     }))
 }
 
@@ -377,11 +379,12 @@ async fn ws_loop(mut socket: WebSocket, s: AppState) {
     loop {
         tick.tick().await;
         n = n.wrapping_add(1);
+        let gr = s.engine.gain_reduction();
         let payload = if n % 6 == 0 {
             let now = s.player.as_ref().map(|p| p.snapshot()).unwrap_or_default();
-            json!({ "meters": s.engine.meters(), "now": now, "volume": s.volume.state() })
+            json!({ "meters": s.engine.meters(), "gr": gr, "now": now, "volume": s.volume.state() })
         } else {
-            json!({ "meters": s.engine.meters() })
+            json!({ "meters": s.engine.meters(), "gr": gr })
         };
         if socket.send(Message::Text(payload.to_string())).await.is_err() {
             break;
