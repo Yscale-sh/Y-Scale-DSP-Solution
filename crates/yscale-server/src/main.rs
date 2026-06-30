@@ -15,6 +15,7 @@
 //!   GET  /ws           WebSocket: live meters + now-playing + volume
 
 mod player;
+mod presets;
 mod volume;
 
 use anyhow::Result;
@@ -74,6 +75,8 @@ struct AppState {
     /// axum drops a per-request clone of the state.
     player: Option<Arc<Player>>,
     volume: Arc<Volume>,
+    presets: Arc<presets::Presets>,
+    active_preset: Arc<Mutex<Option<String>>>,
 }
 
 /// Swap the engine source. If the new source opens an exclusive ALSA device
@@ -142,6 +145,8 @@ async fn main() -> Result<()> {
         config: Arc::new(Mutex::new(config)),
         player,
         volume,
+        presets: Arc::new(presets::Presets::new()),
+        active_preset: Arc::new(Mutex::new(None)),
     };
 
     let app = Router::new()
@@ -153,6 +158,10 @@ async fn main() -> Result<()> {
         .route("/api/seek", post(post_seek))
         .route("/api/now", get(get_now))
         .route("/api/volume", get(get_volume).put(put_volume))
+        .route("/api/presets", get(get_presets))
+        .route("/api/presets/save", post(save_preset))
+        .route("/api/presets/load", post(load_preset))
+        .route("/api/presets/delete", post(delete_preset))
         .route("/api/status", get(get_status))
         .route("/ws", get(ws_handler))
         .fallback(static_handler)
@@ -355,6 +364,64 @@ async fn put_volume(
         s.volume.set_pct(pct).map_err(AppError::bad)?;
     }
     Ok(Json(s.volume.state()))
+}
+
+#[derive(Deserialize)]
+struct PresetReq {
+    name: String,
+}
+
+async fn get_presets(State(s): State<AppState>) -> Json<Value> {
+    Json(json!({
+        "presets": s.presets.list(),
+        "active": s.active_preset.lock().unwrap().clone(),
+    }))
+}
+
+async fn save_preset(
+    State(s): State<AppState>,
+    Json(req): Json<PresetReq>,
+) -> Result<Json<Value>, AppError> {
+    let cfg = s.config.lock().unwrap().clone();
+    s.presets.save(&req.name, &cfg).map_err(AppError::bad)?;
+    *s.active_preset.lock().unwrap() = Some(req.name.trim().to_string());
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn load_preset(
+    State(s): State<AppState>,
+    Json(req): Json<PresetReq>,
+) -> Result<Json<Value>, AppError> {
+    let mut cfg = s.presets.load(&req.name).map_err(AppError::bad)?;
+    // Device/rate/format are fixed at engine start; keep the running values and
+    // swap only the DSP graph (which must keep the same channel counts).
+    cfg.sample_rate = s.engine.sample_rate;
+    let pipeline = cfg.build_pipeline().map_err(AppError::bad)?;
+    if pipeline.n_in() != s.engine.n_in || pipeline.n_out() != s.engine.n_out {
+        return Err(AppError::bad(anyhow::anyhow!(
+            "preset is {}in/{}out but the engine is {}in/{}out — channel-count changes need a restart",
+            pipeline.n_in(),
+            pipeline.n_out(),
+            s.engine.n_in,
+            s.engine.n_out
+        )));
+    }
+    s.engine.swap_pipeline(pipeline);
+    *s.config.lock().unwrap() = cfg;
+    *s.active_preset.lock().unwrap() = Some(req.name.trim().to_string());
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn delete_preset(
+    State(s): State<AppState>,
+    Json(req): Json<PresetReq>,
+) -> Result<Json<Value>, AppError> {
+    s.presets.delete(&req.name).map_err(AppError::bad)?;
+    let mut active = s.active_preset.lock().unwrap();
+    if active.as_deref() == Some(req.name.trim()) {
+        *active = None;
+    }
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn get_status(State(s): State<AppState>) -> Json<Value> {

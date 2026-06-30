@@ -7,6 +7,7 @@ import NowPlaying from './components/NowPlaying.vue'
 import VolumeBar from './components/VolumeBar.vue'
 import PlayerSources from './components/PlayerSources.vue'
 import SourceBar from './components/SourceBar.vue'
+import PresetBar from './components/PresetBar.vue'
 import MasterMeters from './components/MasterMeters.vue'
 import RoutingPanel from './components/RoutingPanel.vue'
 import ChannelStrip from './components/ChannelStrip.vue'
@@ -214,6 +215,47 @@ async function onMute(muted) {
   }
 }
 
+// ── presets / scenes ──────────────────────────────────────────────────────────
+const presets = ref([])
+const activePreset = ref(null)
+async function refreshPresets() {
+  try {
+    const d = await api.getPresets()
+    presets.value = Array.isArray(d.presets) ? d.presets : []
+    activePreset.value = d.active || null
+  } catch {
+    /* ignore */
+  }
+}
+async function onSavePreset(name) {
+  try {
+    await api.savePreset(name)
+    await refreshPresets()
+    showToast(`Saved “${name}”`, 'ok')
+  } catch (e) {
+    showToast(e.message || 'Save failed', 'error')
+  }
+}
+async function onLoadPreset(name) {
+  try {
+    await api.loadPreset(name)
+    await hydrate() // re-pull the applied config so the strips update
+    await refreshPresets()
+    showToast(`Loaded “${name}”`, 'ok')
+  } catch (e) {
+    showToast(e.message || 'Load failed', 'error')
+  }
+}
+async function onDeletePreset(name) {
+  try {
+    await api.deletePreset(name)
+    await refreshPresets()
+    showToast(`Deleted “${name}”`, 'ok')
+  } catch (e) {
+    showToast(e.message || 'Delete failed', 'error')
+  }
+}
+
 // ── derived ───────────────────────────────────────────────────────────────────
 const fs = computed(() => status.value.sample_rate || cfg.sample_rate || 48000)
 const meterChannels = computed(() =>
@@ -258,6 +300,7 @@ onMounted(async () => {
     loadError.value = e.message || 'Could not reach the DSP server.'
   }
   api.start()
+  refreshPresets()
 })
 
 onBeforeUnmount(() => api.stop())
@@ -362,6 +405,15 @@ onBeforeUnmount(() => api.stop())
 
     <!-- ─────────────────────────── SOUND / DSP ─────────────────────── -->
     <div v-else class="grid lg:grid-cols-12 gap-5">
+      <div class="lg:col-span-12">
+        <PresetBar
+          :presets="presets"
+          :active="activePreset"
+          @save="onSavePreset"
+          @load="onLoadPreset"
+          @delete="onDeletePreset"
+        />
+      </div>
       <div class="lg:col-span-8">
         <SourceBar :now-playing="genLabel" @play="onGenerator" @play-url="onPlayUrl" @stop="onStop" />
       </div>
