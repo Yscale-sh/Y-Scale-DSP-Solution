@@ -224,6 +224,11 @@ pub struct ChannelCfg {
     pub graphic_eq: Option<Vec<f64>>,
     /// Optional crossover section for this channel.
     pub crossover: Option<CrossoverCfg>,
+    /// Optional FIR convolution filter (room correction) — references a stored
+    /// impulse response by name. Coefficients are loaded by the server (not the
+    /// pure config), so this holds only the name.
+    #[serde(default)]
+    pub fir: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

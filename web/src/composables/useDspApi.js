@@ -54,6 +54,12 @@ export function useDspApi() {
   const loadPreset = (name) => send('api/presets/load', 'POST', { name })
   const deletePreset = (name) => send('api/presets/delete', 'POST', { name })
 
+  // ── FIR convolution / room correction ────────────────────────────────────────
+  const getFirs = () => getJson('api/firs')
+  const uploadFir = (name, buffer) =>
+    fetch(`api/firs/upload?name=${encodeURIComponent(name)}`, { method: 'POST', body: buffer }).then(jsonOrThrow)
+  const deleteFir = (name) => send('api/firs/delete', 'POST', { name })
+
   // ── Master volume ────────────────────────────────────────────────────────────
   async function setVolume(body) {
     const v = await send('api/volume', 'PUT', body)
@@ -162,6 +168,7 @@ export function useDspApi() {
     postSource, playUrl, pause, stopPlayback, seek,
     setVolume, refreshNow, refreshStatus,
     getPresets, savePreset, loadPreset, deletePreset,
+    getFirs, uploadFir, deleteFir,
     start, stop,
   }
 }

@@ -16,12 +16,13 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use yscale_dsp::{BassManager, Limiter, Pipeline};
+use yscale_dsp::{BassManager, FirBank, Limiter, Pipeline};
 
 enum Command {
     SwapPipeline(Box<Pipeline>),
     SwapSource(Box<dyn Source>),
     SwapBass(Box<BassManager>),
+    SwapFir(Box<FirBank>),
 }
 
 /// Per-output-channel peak meters (linear 0..1), updated by the RT thread.
@@ -58,6 +59,8 @@ pub struct EngineHandle {
     gr: Arc<AtomicU32>,
     /// Live output spectrum analyzer (RTA).
     analyzer: Arc<Analyzer>,
+    /// Engine block size (frames per period) — needed to build FIR convolvers.
+    period: usize,
     join: Option<JoinHandle<()>>,
     pub n_in: usize,
     pub n_out: usize,
@@ -81,6 +84,15 @@ impl EngineHandle {
     pub fn swap_bass(&self, b: BassManager) {
         if let Ok(tx) = self.tx.lock() {
             let _ = tx.send(Command::SwapBass(Box::new(b)));
+        }
+    }
+    /// Replace the per-channel FIR convolution bank live. `per_channel[c]` =
+    /// `Some(coeffs)` enables a FIR on output channel `c`. The (expensive) FFT
+    /// precompute happens here, off the realtime thread.
+    pub fn swap_fir(&self, per_channel: Vec<Option<Vec<f64>>>) {
+        let bank = FirBank::new(self.n_out, self.period, per_channel);
+        if let Ok(tx) = self.tx.lock() {
+            let _ = tx.send(Command::SwapFir(Box::new(bank)));
         }
     }
     /// Current per-output-channel peak levels (linear).
@@ -152,6 +164,7 @@ pub fn spawn(config: &Config, source: Box<dyn Source>) -> Result<EngineHandle> {
     let gr = Arc::new(AtomicU32::new(0));
     let limiter = config.build_limiter(n_out);
     let bass = config.build_bass(n_out);
+    let fir = FirBank::empty(n_out, frames);
     let analyzer = Arc::new(Analyzer::start(config.sample_rate));
 
     let stop_t = stop.clone();
@@ -163,7 +176,7 @@ pub fn spawn(config: &Config, source: Box<dyn Source>) -> Result<EngineHandle> {
         .name("yscale-rt".into())
         .spawn(move || {
             rt_loop(
-                out, pipeline, source, rx, stop_t, meters_t, gr_t, analyzer_t, bass, limiter,
+                out, pipeline, source, rx, stop_t, meters_t, gr_t, analyzer_t, bass, fir, limiter,
                 frames, n_in, n_out, format, dither,
             );
         })?;
@@ -183,6 +196,7 @@ pub fn spawn(config: &Config, source: Box<dyn Source>) -> Result<EngineHandle> {
         meters,
         gr,
         analyzer,
+        period: frames,
         join: Some(join),
         n_in,
         n_out,
@@ -202,6 +216,7 @@ fn rt_loop(
     gr: Arc<AtomicU32>,
     analyzer: Arc<Analyzer>,
     mut bass: BassManager,
+    mut fir: FirBank,
     mut limiter: Limiter,
     frames: usize,
     n_in: usize,
@@ -234,6 +249,9 @@ fn rt_loop(
                 Command::SwapBass(b) => {
                     bass = *b;
                 }
+                Command::SwapFir(f) => {
+                    fir = *f;
+                }
             }
         }
 
@@ -246,8 +264,9 @@ fn rt_loop(
 
         pipeline.process_interleaved(&in_buf, &mut out_buf, frames);
 
-        // Bass management (mono-bass crossover) before the safety limiter.
+        // Bass management (mono-bass crossover), then FIR room correction.
         bass.process(&mut out_buf, frames);
+        fir.process(&mut out_buf, frames);
 
         // Final safety stage: brickwall-limit the output so it can never clip
         // the DAC, whatever EQ/gain is upstream. Meter the post-limiter signal

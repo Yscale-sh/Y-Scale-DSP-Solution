@@ -10,6 +10,7 @@ import SourceBar from './components/SourceBar.vue'
 import PresetBar from './components/PresetBar.vue'
 import Spectrum from './components/Spectrum.vue'
 import BassPanel from './components/BassPanel.vue'
+import FirPanel from './components/FirPanel.vue'
 import MasterMeters from './components/MasterMeters.vue'
 import RoutingPanel from './components/RoutingPanel.vue'
 import ChannelStrip from './components/ChannelStrip.vue'
@@ -75,6 +76,7 @@ function makeChannel(src, i) {
           freq_high: src.crossover.freq_high ?? null,
         }
       : null,
+    fir: src?.fir ?? null,
   }
 }
 
@@ -124,6 +126,7 @@ function buildPayload() {
                 : null,
           }
         : null,
+      fir: ch.fir || null,
     })),
   }
 }
@@ -265,6 +268,39 @@ async function onDeletePreset(name) {
   }
 }
 
+// ── FIR convolution / room correction ─────────────────────────────────────────
+const firs = ref([])
+async function refreshFirs() {
+  try {
+    const d = await api.getFirs()
+    firs.value = Array.isArray(d.firs) ? d.firs : []
+  } catch {
+    /* ignore */
+  }
+}
+async function onUploadFir({ name, buffer }) {
+  try {
+    const res = await api.uploadFir(name, buffer)
+    await refreshFirs()
+    showToast(`Loaded FIR “${name}” · ${res?.taps ?? '?'} taps`, 'ok')
+  } catch (e) {
+    showToast(e.message || 'FIR upload failed', 'error')
+  }
+}
+async function onDeleteFir(name) {
+  try {
+    await api.deleteFir(name)
+    // Drop the reference from any channel using it.
+    cfg.channels.forEach((ch) => {
+      if (ch.fir === name) ch.fir = null
+    })
+    await refreshFirs()
+    showToast(`Deleted FIR “${name}”`, 'ok')
+  } catch (e) {
+    showToast(e.message || 'Delete failed', 'error')
+  }
+}
+
 // ── derived ───────────────────────────────────────────────────────────────────
 const fs = computed(() => status.value.sample_rate || cfg.sample_rate || 48000)
 const meterChannels = computed(() =>
@@ -314,6 +350,7 @@ onMounted(async () => {
   }
   api.start()
   refreshPresets()
+  refreshFirs()
 })
 
 onBeforeUnmount(() => api.stop())
@@ -444,6 +481,10 @@ onBeforeUnmount(() => api.stop())
 
       <div class="lg:col-span-12">
         <BassPanel :bass="cfg.bass" />
+      </div>
+
+      <div class="lg:col-span-12">
+        <FirPanel :channels="cfg.channels" :firs="firs" @upload="onUploadFir" @delete="onDeleteFir" />
       </div>
 
       <div v-for="(ch, i) in cfg.channels" :key="ch._id" class="lg:col-span-6">
