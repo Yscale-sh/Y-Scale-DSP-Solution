@@ -1,6 +1,6 @@
 [package]
 name = "yscale-dsp"
-description = "Slim, high-fidelity, composable audio DSP core: RBJ biquad EQ, parametric & 30-band graphic EQ, Linkwitz-Riley/Butterworth crossovers, fractional-sample time alignment, and channel routing."
+description = "Slim, high-fidelity, composable audio DSP core: RBJ biquad EQ, parametric & 30-band graphic EQ, Butterworth/Linkwitz-Riley/Bessel crossovers (low/high/band-pass), fractional-sample time alignment, FFT FIR convolution, mono-bass management, a look-ahead brickwall limiter, and N×N channel routing."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

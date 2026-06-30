@@ -1,202 +1,220 @@
 # Y-Scale-DSP-Solution
 
-A slim, high-fidelity, open-source audio DSP stack built for loudspeaker
-development and testing on small hardware — starting on a Raspberry Pi Zero 2 W
-with an Innomaker DAC Mini (PCM512x, stereo RCA out, up to 384 kHz / 32-bit).
+A slim, high-fidelity, open-source audio **DSP library** — and a complete
+**network-streamer + loudspeaker processor** built on it. It runs on small
+hardware (developed on a Raspberry Pi Zero 2 W with an Innomaker HiFi DAC,
+PCM5122, stereo RCA) and turns it into a WiiM-class streamer with a full
+Helix/Trinnov-style tuning suite.
 
-Inspired in function by tools like Helix / Audiotec Fischer: routing, time
-alignment, parametric + graphic EQ, and active crossovers — but as a flexible
-library you can build on.
+Inspired in function by Helix / Audiotec Fischer and Trinnov: routing, time
+alignment, parametric + graphic EQ, active crossovers, bass management, a
+brickwall limiter, and FIR room correction — but as a **flexible Rust library
+you can build on**, plus a polished web app to drive it.
 
-> **Status:** headless engine, milestone 1. Real-time DSP runs from the CLI
-> through the DAC. A Vue web UI and DLNA playback are on the roadmap below.
+> **Status:** working end to end. Real-time DSP through the DAC, an mpv-backed
+> network streamer with transport + now-playing, a Vue web app, DLNA, presets,
+> a live RTA, and FIR room correction. Also integrates as a first-class
+> "play on this device" endpoint in [`yscale-media`](https://github.com/Yscale-sh/yscale-media).
 
-## Why
+## Features
 
-When you're bench-building speakers you want to, on the fly: force mono / left /
-right, time-align drivers, sweep and measure, dial in a 30-band EQ, and run an
-active crossover — all at high fidelity. This does that, and the core is a clean
-library (`yscale-dsp`) meant to be reused and extended.
+**DSP (`yscale-dsp`)**
+- RBJ Audio-EQ-Cookbook **biquads** (Direct-Form-II-Transposed) + cascades.
+- **Parametric EQ** (peaking, shelves, pass, notch, all-pass) and a **30-band
+  ISO 1/3-octave graphic EQ**.
+- **Crossovers**: Butterworth (1–8, up to 48 dB/oct), Linkwitz-Riley (even
+  2–8), and **Bessel** (1–4, flat group delay) — **low-, high- and band-pass**.
+- **Time alignment**: fractional-sample delay (4-point Lagrange).
+- **N×N routing matrix** (mono / L / R / swap / arbitrary custom mix).
+- **Bass management**: mono-bass crossover (flat-summing LR) + rumble filter,
+  fold-into-mains or route to a dedicated sub channel.
+- **FIR convolution**: overlap-save FFT engine for linear-phase filtering /
+  room correction (dependency-free radix-2 FFT).
+- **Brickwall limiter**: look-ahead, channel-linked safety limiter.
+- **`verify` module**: convolution + LTI correctness proofs (see below).
+
+**Streamer / appliance (`yscale-engine` + `yscale-server` + web app)**
+- Network player (mpv): play any HTTP(S)/HLS/DASH/`file://` stream **through the
+  DSP**, with real transport (play/pause/seek), live position and now-playing
+  metadata.
+- **DLNA/UPnP** renderer (audio runs through the DSP before the DAC).
+- **Master volume** on the DAC's hardware control, with mute.
+- **Presets / scenes**: save & instantly recall full tunings.
+- **Live RTA** (30-band spectrum of the output) + signal generators.
+- A bold dark **Vue web app** (now-playing first; DSP in a "Sound" tab).
+- First-class **remote control from `yscale-media`** ("Play on mediapi").
+
+## Using the library
+
+`yscale-dsp` is pure, `f64`, allocation-free on the hot path, and engine-agnostic
+— bring your own audio I/O. Add it and compose a `Pipeline`:
+
+```toml
+[dependencies]
+yscale-dsp = "0.1"
+```
+
+```rust
+use yscale_dsp::{crossover, BiquadChain, ChannelMatrix, ChannelStrip,
+                 Coeffs, CrossoverKind, Pipeline};
+
+let fs = 48_000.0;
+
+// A 2-way active crossover at 2 kHz with a little EQ + time-align on the woofer.
+let mut woofer_filters = BiquadChain::new();
+woofer_filters.push(Coeffs::peaking(fs, 80.0, 1.0, 3.0));
+woofer_filters.extend(&crossover::lowpass(CrossoverKind::LinkwitzRiley, 4, 2000.0, fs));
+let mut woofer = ChannelStrip::new(0.02 * fs);
+woofer.set_filters(woofer_filters);
+woofer.delay.set_delay_samples(0.001 * fs); // 1 ms
+
+let mut tweeter = ChannelStrip::new(0.02 * fs);
+tweeter.set_filters(crossover::highpass(CrossoverKind::LinkwitzRiley, 4, 2000.0, fs));
+
+let mut pipeline = Pipeline::new(ChannelMatrix::stereo(), vec![woofer, tweeter]);
+pipeline.process_interleaved(&input, &mut output, frames); // f64 interleaved
+```
+
+Runnable: `cargo run -p yscale-dsp --example pipeline`. Standalone blocks
+(`Biquad`, `crossover`, `FirConv`, `BassManager`, `Limiter`, `Delay`,
+`ChannelMatrix`, `ParametricEq`, `GraphicEq30`) can also be used on their own.
+
+```bash
+cargo test -p yscale-dsp     # math, crossovers, FIR vs direct conv, LTI proofs
+```
 
 ## Architecture
 
-A Cargo workspace, all Rust (no GC pauses, memory-safe, tiny static-ish binary):
+A Cargo workspace, all Rust (no GC pauses, memory-safe, tiny binary):
 
 | Crate | Role |
 |-------|------|
-| **`yscale-dsp`** | The open-source DSP core. `f64`, allocation-free hot path, composable. Biquads (RBJ cookbook), parametric + 30-band ISO graphic EQ, Butterworth/Linkwitz-Riley crossovers, fractional-sample delay (time alignment), N×N channel routing, and a `Pipeline` graph. Plus a `verify` module of **convolution-based proofs** (see below). |
-| **`yscale-engine`** | Real-time loop: ALSA playback, signal generators (sine, log sweep, pink/white noise, impulse) + WAV playback, `f64`→PCM conversion with TPDF dither, and a TOML-driven graph builder. |
+| **`yscale-dsp`** | The open-source DSP core (above). No audio deps. |
+| **`yscale-engine`** | Real-time loop: ALSA playback, signal generators + WAV/Capture sources, `f64`→PCM with TPDF dither, live-swappable pipeline / bass / FIR / limiter, RTA, and per-output meters + gain-reduction. |
 | **`yscale-cli`** | `yscale` — the headless runner. |
+| **`yscale-server`** | `axum` REST + WebSocket server: the mpv streamer brain, master volume, presets, FIR storage, and the embedded Vue web app. |
 
 Signal flow:
 
 ```
-source ─▶ ChannelMatrix (routing/mix) ─▶ per-output ChannelStrip ─▶ DAC (ALSA)
-                                          delay → EQ+crossover → gain/polarity/mute
+source ─▶ ChannelMatrix ─▶ per-output ChannelStrip ─▶ bass mgmt ─▶ FIR ─▶ limiter ─▶ DAC
+ (gen/file/        (routing/mix)   delay → EQ + crossover            (mono     (room       (safety
+  URL/DLNA)                        → gain/polarity/mute               bass)    correction)  brickwall)
 ```
 
-## Hardware setup (Pi Zero 2 W + Innomaker DAC Mini)
+URL/DLNA sources are decoded by mpv into an ALSA `snd-aloop` loopback that the
+engine captures — so streamed audio gets the full DSP, with the DAC as the
+single clock master.
 
-In `/boot/firmware/config.txt`:
+## Hardware setup (Pi Zero 2 W + Innomaker HiFi DAC / PCM5122)
+
+The board is an I2S-**master** DAC (it owns the clock via its own oscillators),
+exposed by the BossDAC overlay. In `/boot/firmware/config.txt`:
 
 ```ini
 dtparam=i2c_arm=on
-dtparam=i2s=on
-dtoverlay=hifiberry-dacplus,slave   # PCM512x; the ",slave" is REQUIRED here
+dtoverlay=allo-boss-dac-pcm512x-audio   # PCM512x master-clock board -> card "BossDAC"
 ```
 
-> **The `,slave` matters.** The DAC Mini does not master the I2S clock. Without
-> `,slave` the card still enumerates, but every real playback throws
-> `Input/output error` and the kernel logs `bcm2835-i2s: I2S SYNC error!`.
-> `,slave` makes the **Pi** generate BCLK/LRCLK and the DAC follow — clean audio.
+> **Kernel note.** On current Raspberry Pi OS (kernel **6.12**) the master-clock
+> path regresses — playback throws I/O errors / `I2S SYNC error`
+> ([raspberrypi/linux#5843](https://github.com/raspberrypi/linux/issues/5843)).
+> Pin a **6.6.x** kernel until it's fixed (e.g. install the 4 K `+rpt-rpi-v8`
+> 6.6.62 kernel/initramfs/dtbs into `/boot/firmware/66b/` and add
+> `os_prefix=66b/`). The Zero 2 W needs the **4 K**-page kernel to network
+> headless (not the 16 K `-v8-16k`).
 
-For glitch-free playback also pin the CPU clock (resets on reboot; make it
-persistent with a small systemd oneshot if you want it permanent):
+For glitch-free playback also pin the CPU governor (persist with a small systemd
+oneshot):
 
 ```bash
 echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
 ```
 
-The DAC supports S16/S24/S32 at 8 kHz–384 kHz, stereo. We default to S32_LE.
+The DAC does S16/S24/S32, stereo; we default to `S32_LE` @ 48 kHz.
 
 ## Build & deploy
 
-The Pi has too little RAM to compile Rust (rustup OOMs unpacking). Instead we
-build a **native aarch64 binary in Docker** (works great on an Apple-Silicon /
-arm64 Docker host) and ship just the binary.
+The Pi has too little RAM to compile Rust, so build a **native aarch64 binary in
+Docker** (great on an Apple-Silicon / arm64 Docker host) and ship the binary.
 
 ```bash
-# one-time: build the builder image (Debian + libasound2-dev)
-docker build -f build/Dockerfile -t yscale-builder .
+docker build -f build/Dockerfile -t yscale-builder .   # one-time builder image
 
-# build + deploy to the Pi
-./deploy/deploy.sh jake@treepi.local
+./deploy/deploy.sh      jake@mediapi.local   # CLI engine + configs
+./deploy/deploy-web.sh  jake@mediapi.local   # web app + server (systemd service)
+./deploy/setup-dlna.sh  jake@mediapi.local   # snd-aloop + gmediarender + mpv
 ```
 
-Develop locally: the pure DSP core builds and tests natively on any platform.
+Then open **`http://mediapi.local:8080`** from any device on the LAN. The built
+UI (`web/dist`) is embedded into the server binary via `rust-embed`, so the
+server is a single file.
+
+## CLI usage
 
 ```bash
-cargo test -p yscale-dsp      # math + convolution proofs (no audio hardware)
-```
-
-## Usage
-
-```bash
-# Stereo pass-through, 1 kHz tone at a safe level (connect a load first!)
-yscale --config /etc/yscale/passthrough.toml sine --freq 1000 --amp 0.1
-
-# 10 s log sweep, looped — eyeball/measure frequency response
 yscale --config /etc/yscale/two-way-speaker.toml sweep --f1 20 --f2 20000 --dur 10 --loop
-
-# Pink noise for break-in / level matching
-yscale pink --amp 0.2
-
-# Single impulse for time-of-arrival, or play a WAV
-yscale impulse
+yscale --config /etc/yscale/passthrough.toml sine --freq 1000 --amp 0.1
+yscale pink --amp 0.2     # break-in / level matching
+yscale impulse            # time-of-arrival
 yscale file track.wav --loop
 ```
 
-Sources: `sine`, `sweep`, `pink`, `white`, `impulse`, `file`. Global flags:
+Sources: `sine`, `sweep`, `pink`, `white`, `impulse`, `file`. Flags:
 `--config <toml>`, `--device <alsa>`, `--rate <hz>`.
 
 ## Configuration
 
-A config declares the device and the DSP graph. See `configs/` for full
-examples — `passthrough.toml`, `two-way-speaker.toml` (active LR4 crossover),
-and `graphic-eq.toml` (30-band). Routing presets: `stereo`, `mono`,
-`left_to_both`, `right_to_both`, `swap`, `custom` (arbitrary `[out][in]` matrix).
-Per output channel: `gain_db`, `delay_ms`/`delay_cm`, `invert`, `mute`,
-parametric `eq` bands, a 30-band `graphic_eq`, and a `crossover`.
+A TOML config declares the device + DSP graph; see `configs/`
+(`passthrough.toml`, `two-way-speaker.toml`, `graphic-eq.toml`). Top level:
+`routing` (presets `stereo`/`mono`/`left_to_both`/`right_to_both`/`swap`/`custom`
+matrix), `[limiter]`, `[bass]`, and one `[[channel]]` per output with `gain_db`,
+`delay_ms`/`delay_cm`, `invert`, `mute`, parametric `eq`, `graphic_eq`,
+`crossover` (kind `butterworth`/`linkwitz_riley`/`bessel`, role
+`low_pass`/`high_pass`/`band_pass` with `freq`/`freq_high`/`order`), and `fir`
+(a stored FIR by name).
+
+## HTTP API
+
+```
+GET/PUT /api/config            current DSP graph (PUT hot-swaps it live)
+POST    /api/source            test source (sine/sweep/pink/white/impulse/file/capture)
+POST    /api/play              play a URL through the DSP (+ now-playing metadata)
+POST    /api/pause /stop /seek transport
+GET     /api/now               now-playing + volume + meters + gain-reduction + spectrum
+GET/PUT /api/volume            master volume / mute (DAC hardware control)
+GET     /api/presets           list; POST /api/presets/save|load|delete
+GET     /api/firs              list; POST /api/firs/upload?name= (WAV/text); /delete
+GET     /api/status            rate / channels / meters / gain-reduction
+GET     /ws                    live meters + now-playing + volume + spectrum
+```
 
 ## Correctness: convolution + LTI verification
 
-Because high fidelity demands it, the DSP core is verified, not just hoped at.
-The blocks are **IIR** (Direct-Form-II-Transposed biquads and cascades), so
-verification is done against convolution — an LTI system's defining operation —
-*within numerical tolerance*, not bit-exactly:
+High fidelity demands it, so the DSP core is verified, not hoped at. The blocks
+are **IIR** (DF-II-T biquads/cascades), so verification is against convolution —
+an LTI system's defining operation — *within numerical tolerance*:
 
 1. capture the block's impulse response (IR);
-2. assert direct processing of an arbitrary signal **matches** convolving that
-   signal with the IR **within `f64` precision** — proving self-consistency
-   (compared only over output indices the captured IR fully covers, so IIR-tail
-   truncation can't skew it);
-3. assert the **DTFT of the IR matches the analytic transfer function** from the
-   coefficients (time-domain ↔ frequency-domain agreement, to a dB tolerance);
-4. because self-consistency alone wouldn't catch a hidden nonlinearity (e.g. a
-   saturation bug that only bites at high amplitude), also assert the two
-   defining LTI properties directly: **homogeneity** (`process(k·x) == k·process(x)`)
-   and **time-invariance** (delaying the input delays the output).
+2. assert direct processing of an arbitrary signal **matches** convolving it with
+   the IR within `f64` precision (compared only over indices the IR fully covers,
+   so IIR-tail truncation can't skew it);
+3. assert the **DTFT of the IR matches the analytic transfer function**;
+4. assert the LTI properties directly — **homogeneity** (`process(k·x) ==
+   k·process(x)`) and **time-invariance** — to catch hidden nonlinearities.
 
-> On exactness: the recursive filter and the convolution sum evaluate
-> products/sums in different orders, and `f64` addition isn't associative — so
-> they agree to ~1e-9, never bit-for-bit. Fixed-point cores *can* be bit-exact,
-> but only if the test's convolution mirrors the quantization/saturation exactly.
-
-The `yscale_dsp::verify` module exposes all of these primitives
-(`lti_residual`, `dtft_magnitude`, `homogeneity_residual`,
-`time_invariance_residual`) so you can verify your own configs. (Convolution only
-characterizes LTI systems; generators, dither, and mute toggling are validated by
-other means.)
-
-## Web UI
-
-A bold, dark "Phosphor Lab" Vue 3 + Vite + Tailwind control surface
-(`web/`), served by the **`yscale-server`** crate — an `axum` server with live
-control over the LAN. Open `http://<pi>:8080` from any device (phone included):
-source/transport, live WebSocket VU meters, routing presets, two channel strips
-(gain/mute/invert/delay), parametric EQ with a draggable-node response curve, a
-30-band graphic EQ, and crossovers — all applied live (debounced `PUT
-/api/config` hot-swaps the DSP graph without dropping audio).
-
-```bash
-# build the UI + server and deploy as a systemd service on the Pi
-./deploy/deploy-web.sh mediapi.local
-# then open http://mediapi.local:8080
-```
-
-API: `GET/PUT /api/config`, `POST /api/source`, `GET /api/status`, `GET /ws`
-(meter stream). The built UI (`web/dist`) is embedded into the server binary via
-`rust-embed`, so deployment is a single file. Rebuild the UI with
-`cd web && npm install && npm run build`.
-
-## DLNA / network streaming (through the DSP)
-
-Turn the Pi into a **streamer-DSP**: a UPnP/DLNA renderer whose audio is run
-through your EQ/crossover/routing before the DAC. The chain is
-
-```
-control app ──directs──▶ mediapi renderer ──pulls──▶ from your media server
-                              │  (gmediarender)
-                              ▼
-                         ALSA snd-aloop loopback ──▶ yscale capture source ──▶ DSP ──▶ DAC
-```
-
-One-time setup:
-
-```bash
-./deploy/setup-dlna.sh mediapi.local   # snd-aloop + gmediarender ("mediapi"), output -> loopback
-```
-
-To play: in the web UI choose the **DLNA / Stream In** source, then from any
-UPnP control app (BubbleUPnP, mconnect, upplay, Kodi…) cast to the **mediapi**
-renderer. The engine captures the loopback (`plughw:Loopback,1,0`) as its source
-— so the stream gets the full DSP — with the DAC as the single clock master.
-
-You can also play **any stream URL directly**: pick the **Stream URL** source (or
-`POST /api/play {"url":"…"}`) with an HTTP(S)/HLS/DASH/`file://` URL — web radio,
-or a yscale-media track's bit-perfect `…/api/v1/mediafile/:id/direct` URL. The
-server decodes it with GStreamer into the same loopback → DSP → DAC path. This
-is the foundation of the **yscale playback-endpoint** model (see
-[`yscale-media` PR: playback endpoints](https://github.com/Yscale-sh/yscale-media/pull/6)).
+`yscale_dsp::verify` exposes these (`lti_residual`, `dtft_magnitude`,
+`homogeneity_residual`, `time_invariance_residual`) for your own configs. The FIR
+engine is additionally checked against a direct convolution reference, and the
+crossovers against their −3/−6 dB points and slopes.
 
 ## Roadmap
 
-- **Streamer UI** — make the web UI itself a UPnP control point (browse the
-  media server + pick tracks in-app, no separate controller).
-- **Multi-Pi** — slave several Pi Zero 2 W as N synchronized DACs/receivers in
-  one enclosure, word-clocked together.
-- DSP: more crossover alignments (Bessel), FIR/linear-phase option, RTA, and
-  measurement export.
+- **Streamer UI** — make the web app itself a UPnP control point (browse + pick
+  tracks in-app).
+- **Multi-Pi** — slave several Pi Zero 2 W as N word-clocked DACs in one
+  enclosure (enables a true dedicated subwoofer output).
+- **Measurement** — in-app sweep capture + auto room-correction FIR generation.
 
 ## License
 
