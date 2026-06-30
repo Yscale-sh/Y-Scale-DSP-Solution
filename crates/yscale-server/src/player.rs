@@ -213,6 +213,10 @@ impl Player {
     /// Spawn mpv idle, feeding `audio_device` (e.g. `plughw:Loopback,0,0`) at
     /// `samplerate` Hz so the loopback runs at the engine's clock.
     pub fn start(audio_device: &str, samplerate: u32) -> Result<Player> {
+        // A previous run's mpv can outlive the server across a restart and keep
+        // holding the IPC socket, which blocks our new instance. Clear any stray
+        // mpv bound to our socket path before (re)starting.
+        let _ = Command::new("pkill").args(["-f", SOCKET]).status();
         let _ = std::fs::remove_file(SOCKET);
         let child = Command::new("mpv")
             .args([

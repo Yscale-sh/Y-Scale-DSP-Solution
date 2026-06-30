@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use yscale_dsp::crossover::{self, CrossoverKind};
 use yscale_dsp::eq::{Band, BandKind, GraphicEq30};
-use yscale_dsp::{BiquadChain, ChannelMatrix, ChannelStrip, Pipeline};
+use yscale_dsp::{BiquadChain, ChannelMatrix, ChannelStrip, Limiter, Pipeline};
 
 /// Top-level configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +30,51 @@ pub struct Config {
     /// One entry per output channel. Empty => stereo pass-through.
     #[serde(default)]
     pub channel: Vec<ChannelCfg>,
+    /// Final-stage brickwall safety limiter (on by default).
+    #[serde(default)]
+    pub limiter: LimiterCfg,
+}
+
+/// Final-stage safety limiter so the DSP can never clip the DAC, regardless of
+/// the EQ/gain dialed into the channel strips.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LimiterCfg {
+    #[serde(default = "default_limiter_enabled")]
+    pub enabled: bool,
+    /// Output ceiling in dBFS (a touch below 0 leaves inter-sample headroom).
+    #[serde(default = "default_ceiling_db")]
+    pub ceiling_db: f64,
+    /// Look-ahead window in ms (also sets the attack smoothing + latency).
+    #[serde(default = "default_lookahead_ms")]
+    pub lookahead_ms: f64,
+    /// Release time in ms (how quickly gain recovers after a peak).
+    #[serde(default = "default_release_ms")]
+    pub release_ms: f64,
+}
+
+fn default_limiter_enabled() -> bool {
+    true
+}
+fn default_ceiling_db() -> f64 {
+    -1.0
+}
+fn default_lookahead_ms() -> f64 {
+    2.0
+}
+fn default_release_ms() -> f64 {
+    100.0
+}
+
+impl Default for LimiterCfg {
+    fn default() -> Self {
+        Self {
+            enabled: default_limiter_enabled(),
+            ceiling_db: default_ceiling_db(),
+            lookahead_ms: default_lookahead_ms(),
+            release_ms: default_release_ms(),
+        }
+    }
 }
 
 fn default_sample_rate() -> u32 {
@@ -59,6 +104,7 @@ impl Default for Config {
             dither: false,
             routing: Routing::default(),
             channel: Vec::new(),
+            limiter: LimiterCfg::default(),
         }
     }
 }
@@ -228,6 +274,18 @@ impl Config {
         } else {
             self.channel.len()
         }
+    }
+
+    /// Build the final-stage safety limiter for `n_out` output channels.
+    pub fn build_limiter(&self, n_out: usize) -> Limiter {
+        Limiter::new(
+            self.sample_rate as f64,
+            n_out,
+            self.limiter.ceiling_db,
+            self.limiter.lookahead_ms,
+            self.limiter.release_ms,
+            self.limiter.enabled,
+        )
     }
 
     /// Compile the configuration into a runnable DSP pipeline.

@@ -13,7 +13,7 @@ import ChannelStrip from './components/ChannelStrip.vue'
 import Toast from './components/Toast.vue'
 
 const api = useDspApi()
-const { meters, status, now, volume, wsState } = api
+const { meters, gr, status, now, volume, wsState } = api
 
 const ACCENTS = ['var(--color-signal)', 'var(--color-violet)', 'var(--color-cool)', 'var(--color-amber)']
 const defaultName = (i) => ['Left', 'Right'][i] ?? `Channel ${i + 1}`
@@ -346,7 +346,7 @@ onBeforeUnmount(() => api.stop())
         <PlayerSources @play-url="onPlayUrl" @dlna="onDlna" />
       </div>
       <div class="lg:col-span-4">
-        <MasterMeters :meters="meters" :channels="meterChannels" :ws-state="wsState" />
+        <MasterMeters :meters="meters" :channels="meterChannels" :ws-state="wsState" :gr="gr" />
       </div>
     </div>
 
@@ -356,7 +356,7 @@ onBeforeUnmount(() => api.stop())
         <SourceBar :now-playing="genLabel" @play="onGenerator" @play-url="onPlayUrl" @stop="onStop" />
       </div>
       <div class="lg:col-span-4">
-        <MasterMeters :meters="meters" :channels="meterChannels" :ws-state="wsState" />
+        <MasterMeters :meters="meters" :channels="meterChannels" :ws-state="wsState" :gr="gr" />
       </div>
 
       <div class="lg:col-span-12">

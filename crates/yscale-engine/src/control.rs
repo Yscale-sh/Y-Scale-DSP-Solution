@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use yscale_dsp::Pipeline;
+use yscale_dsp::{Limiter, Pipeline};
 
 enum Command {
     SwapPipeline(Box<Pipeline>),
@@ -52,6 +52,8 @@ pub struct EngineHandle {
     tx: Mutex<Sender<Command>>,
     stop: Arc<AtomicBool>,
     meters: Arc<Meters>,
+    /// Safety-limiter gain reduction (dB, >= 0), stored as `f32` bits.
+    gr: Arc<AtomicU32>,
     join: Option<JoinHandle<()>>,
     pub n_in: usize,
     pub n_out: usize,
@@ -74,6 +76,10 @@ impl EngineHandle {
     /// Current per-output-channel peak levels (linear).
     pub fn meters(&self) -> Vec<f32> {
         self.meters.read()
+    }
+    /// Current safety-limiter gain reduction in dB (>= 0; 0 = not limiting).
+    pub fn gain_reduction(&self) -> f32 {
+        f32::from_bits(self.gr.load(Ordering::Relaxed))
     }
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
@@ -129,15 +135,19 @@ pub fn spawn(config: &Config, source: Box<dyn Source>) -> Result<EngineHandle> {
     let (tx, rx) = channel::<Command>();
     let stop = Arc::new(AtomicBool::new(false));
     let meters = Arc::new(Meters::new(n_out));
+    let gr = Arc::new(AtomicU32::new(0));
+    let limiter = config.build_limiter(n_out);
 
     let stop_t = stop.clone();
     let meters_t = meters.clone();
+    let gr_t = gr.clone();
     let dither = config.dither;
     let join = std::thread::Builder::new()
         .name("yscale-rt".into())
         .spawn(move || {
             rt_loop(
-                out, pipeline, source, rx, stop_t, meters_t, frames, n_in, n_out, format, dither,
+                out, pipeline, source, rx, stop_t, meters_t, gr_t, limiter, frames, n_in, n_out,
+                format, dither,
             );
         })?;
 
@@ -154,6 +164,7 @@ pub fn spawn(config: &Config, source: Box<dyn Source>) -> Result<EngineHandle> {
         tx: Mutex::new(tx),
         stop,
         meters,
+        gr,
         join: Some(join),
         n_in,
         n_out,
@@ -162,6 +173,7 @@ pub fn spawn(config: &Config, source: Box<dyn Source>) -> Result<EngineHandle> {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn rt_loop(
     out: AlsaOutput,
     mut pipeline: Pipeline,
@@ -169,6 +181,8 @@ fn rt_loop(
     rx: Receiver<Command>,
     stop: Arc<AtomicBool>,
     meters: Arc<Meters>,
+    gr: Arc<AtomicU32>,
+    mut limiter: Limiter,
     frames: usize,
     n_in: usize,
     n_out: usize,
@@ -208,6 +222,12 @@ fn rt_loop(
         }
 
         pipeline.process_interleaved(&in_buf, &mut out_buf, frames);
+
+        // Final safety stage: brickwall-limit the output so it can never clip
+        // the DAC, whatever EQ/gain is upstream. Meter the post-limiter signal
+        // (what actually reaches the DAC) and publish the gain reduction.
+        limiter.process(&mut out_buf, frames);
+        gr.store((limiter.gain_reduction_db() as f32).to_bits(), Ordering::Relaxed);
 
         // Per-channel peak with decay, for the UI meters.
         for p in peak.iter_mut() {
